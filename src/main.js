@@ -252,23 +252,29 @@ function marker(record) {
 
 function dependencyPurl(record) {
   const ecosystem = record.package?.ecosystem || '';
-  const name = String(record.package?.name || '').replace(/^@/, '%40');
+  const name = String(record.package?.name || '')
+    .split('/')
+    .map(part => encodeURIComponent(part).replaceAll(/[!'()*]/g, character =>
+      `%${character.codePointAt(0).toString(16).toUpperCase()}`))
+    .join('/');
   const types = {
     npm: 'npm', go: 'golang', gomod: 'golang', pip: 'pypi', python: 'pypi',
     maven: 'maven', gradle: 'maven', cargo: 'cargo', bundler: 'gem',
     composer: 'composer', nuget: 'nuget', pub: 'pub', hex: 'hex', mix: 'hex',
     docker: 'docker',
   };
-  return `pkg:${types[ecosystem] || ecosystem}/${name}`;
+  const version = record.package?.version
+    ? `@${encodeURIComponent(String(record.package.version)).replaceAll(/[!'()*]/g, character =>
+      `%${character.codePointAt(0).toString(16).toUpperCase()}`)}`
+    : '';
+  return `pkg:${types[ecosystem] || ecosystem}/${name}${version}`;
 }
 
-function mapVexStatus(record) {
-  const mapping = {
-    not_used: { status: 'not_affected', justification: 'vulnerable_code_not_present' },
-    inaccurate: { status: 'not_affected', justification: 'vulnerable_code_not_in_execute_path' },
-    tolerable_risk: { status: 'not_affected', justification: 'inline_mitigations_already_exist' },
-  };
-  return mapping[record.dismissed_reason] || { status: 'under_investigation' };
+function mapVexStatus() {
+  // A Dependabot dismissal is not sufficient evidence for a not_affected VEX
+  // assertion. Keep the generated candidate conservative until a reviewer
+  // establishes the product-specific status and justification.
+  return { status: 'under_investigation' };
 }
 
 async function annotateNoBandwidth(alert) {
@@ -300,7 +306,7 @@ function mergeLedger(existing, current) {
 }
 
 function vexCandidate(record, products) {
-  const status = mapVexStatus(record);
+  const status = mapVexStatus();
   return {
     vulnerability: {
       name: record.vulnerability.name,
@@ -338,7 +344,10 @@ function loadLedger(normalized) {
     existingLedger,
     normalized.filter(record => record.dismissed_reason !== 'no_bandwidth'),
   );
-  writeJson(ledgerPath, ledger);
+  const ledgerExists = fs.existsSync(absolute(ledgerPath));
+  const changed = (ledger.alerts.length > 0 || ledgerExists)
+    && (!ledgerExists || JSON.stringify(ledger) !== JSON.stringify(existingLedger));
+  if (changed) writeJson(ledgerPath, ledger);
 
   const records = ledger.alerts || [];
   const invalid = records.filter(record => !record.package?.ecosystem || !record.package?.name);
@@ -346,7 +355,7 @@ function loadLedger(normalized) {
     const invalidAlerts = invalid.map(record => `alert=${record.alert}`).join(', ');
     fail(`Dismissal records are missing package identity: ${invalidAlerts}`);
   }
-  return records;
+  return { records, changed };
 }
 
 function retargetStatement(statement, eligible, products) {
@@ -403,12 +412,12 @@ function buildVexDocument(existingVex, records, products) {
   return { changed, newRecords, statements, vex };
 }
 
-function pullRequestDetails(newRecords, skipped) {
+function pullRequestDetails(newRecords, skipped, ledgerChanged, vexChanged) {
   const vulnerabilityCodes = [...new Set(newRecords.map(record => record.vulnerability.name))];
   const vulnerabilityList = newRecords.length
     ? newRecords.map(record => `- ${record.vulnerability.name} (${record.package.name}) — ${record.url}`).join('\n')
-    : '- Existing VEX product scope updated';
-  let title = 'Update VEX product scope';
+    : vexChanged ? '- Existing VEX product scope updated' : '- Dependabot dismissal ledger initialized or updated';
+  let title = vexChanged ? 'Update VEX product scope' : 'Update Dependabot dismissal ledger';
   if (newRecords.length === 1) {
     const record = newRecords[0];
     title = `Add VEX statement for ${record.vulnerability.name} (${record.package.name})`;
@@ -419,7 +428,7 @@ function pullRequestDetails(newRecords, skipped) {
     ? `Skipped alert(s) because their dismissal reason is no_bandwidth: ${skipped.map(record => record.alert).join(', ')}. The action annotated the original alert that this is not a security assessment and generated no VEX statement for it.`
     : '';
   const body = [
-    'This pull request adds reviewed OpenVEX statements generated from dismissed Dependabot alerts.',
+    'This pull request updates reviewed OpenVEX candidates and historical Dependabot dismissal metadata.',
     '',
     'Relevant vulnerability alerts:',
     vulnerabilityList,
@@ -440,25 +449,24 @@ async function main() {
   const skipped = normalized.filter(record => record.dismissed_reason === 'no_bandwidth');
   await annotateSkippedAlerts(alerts);
 
-  const records = loadLedger(normalized);
+  const { records, changed: ledgerChanged } = loadLedger(normalized);
   const existingVex = readJson(vexPath, {
     '@context': 'https://openvex.dev/ns/v0.2.0',
     version: 1,
     statements: [],
   });
-  const { changed, newRecords, statements, vex } = buildVexDocument(existingVex, records, products);
-  if (changed || fs.existsSync(absolute(vexPath))) writeJson(vexPath, vex);
+  const { changed: vexChanged, newRecords, statements, vex } = buildVexDocument(existingVex, records, products);
+  if (vexChanged || fs.existsSync(absolute(vexPath))) writeJson(vexPath, vex);
+  const changed = ledgerChanged || vexChanged;
 
-  const { body, title, vulnerabilityCodes } = pullRequestDetails(newRecords, skipped);
+  const { body, title, vulnerabilityCodes } = pullRequestDetails(newRecords, skipped, ledgerChanged, vexChanged);
 
   output('changed', changed ? 'true' : 'false');
-  output('vex-changed', changed ? 'true' : 'false');
+  output('vex-changed', vexChanged ? 'true' : 'false');
   output('candidate-branch', candidateBranch);
   output('pull-request-title', title);
   output('pull-request-body', body);
-  output('pull-request-number', '');
-  output('pull-request-url', '');
-  output('vulnerability-codes', vulnerabilityCodes.join(', ') || 'scope update');
+  output('vulnerability-codes', vulnerabilityCodes.join(', ') || (ledgerChanged ? 'ledger update' : 'scope update'));
   output('skipped-alerts', skipped.map(record => record.alert).join(', '));
   console.log(`Currently dismissed Dependabot alerts: ${alerts.length}`);
   console.log(`Historical dismissal records: ${records.length}`);

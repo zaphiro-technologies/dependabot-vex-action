@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
 import test from 'node:test';
@@ -62,7 +63,7 @@ async function runAction(alerts, {
   nextAlerts,
   serverError,
 } = {}) {
-  const workspace = await mkdtemp(path.resolve('test-workspace-'));
+  const workspace = await mkdtemp(path.join(tmpdir(), 'dependabot-vex-action-'));
   const output = path.join(workspace, 'github-output');
   const requests = [];
   for (const [file, contents] of Object.entries(files)) {
@@ -136,11 +137,13 @@ async function runAction(alerts, {
   });
 
   const vexFile = path.join(workspace, '.vex/dependabot.openvex.json');
+  const ledgerFile = path.join(workspace, '.vex/dependabot-dismissals.json');
   const outputText = await readFile(output, 'utf8').catch(() => '');
   const vex = await readFile(vexFile, 'utf8').then(JSON.parse).catch(() => null);
+  const ledger = await readFile(ledgerFile, 'utf8').then(JSON.parse).catch(() => null);
   await new Promise(resolve => server.close(resolve));
   await rm(workspace, { recursive: true, force: true });
-  return { ...result, requests, output: outputText, vex };
+  return { ...result, requests, output: outputText, vex, ledger };
 }
 
 function outputValue(text, name) {
@@ -153,7 +156,7 @@ function outputValue(text, name) {
   return lines.slice(start + 1, end === -1 ? lines.length : end).join('\n');
 }
 
-test('maps dismissal reasons and links the original alerts', async () => {
+test('keeps dismissal-derived candidates under investigation and links the original alerts', async () => {
   const result = await runAction([
     alert(1, 'not_used', 'CVE-2022-32149'),
     alert(2, 'inaccurate', 'CVE-2021-38561'),
@@ -165,9 +168,9 @@ test('maps dismissal reasons and links the original alerts', async () => {
   assert.deepEqual(
     result.vex.statements.map(statement => [statement.status, statement.justification]),
     [
-      ['not_affected', 'vulnerable_code_not_present'],
-      ['not_affected', 'vulnerable_code_not_in_execute_path'],
-      ['not_affected', 'inline_mitigations_already_exist'],
+      ['under_investigation', undefined],
+      ['under_investigation', undefined],
+      ['under_investigation', undefined],
     ],
   );
   assert.match(outputValue(result.output, 'pull-request-title'), /Add VEX statements for/);
@@ -224,6 +227,10 @@ test('paginates alerts and derives product PURLs from supported project files', 
   assert.equal(result.vex.statements.length, 2);
   assert.equal(result.requests.filter(request => request.method === 'GET').length, 2);
   assert.equal(result.vex.statements[0].products.length, 4);
+  assert.equal(
+    result.vex.statements[0].products[0].subcomponents[0]['@id'],
+    'pkg:golang/golang.org/x/text@v0.3.2',
+  );
 });
 
 test('updates retained statements and reports a scope-only change', async () => {
@@ -252,6 +259,42 @@ test('handles an empty alert list without creating a VEX document', async () => 
   assert.equal(result.code, 0, result.stderr);
   assert.equal(result.vex, null);
   assert.equal(result.output, '');
+});
+
+test('does not create an empty historical ledger when there are no alerts', async () => {
+  const result = await runAction([]);
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.vex, null);
+  assert.equal(result.ledger, null);
+  assert.equal(outputValue(result.output, 'changed'), 'false');
+  assert.equal(outputValue(result.output, 'vex-changed'), 'false');
+});
+
+test('reports a ledger-only change when an existing VEX statement is unchanged', async () => {
+  const current = alert(11, 'not_used', 'CVE-2022-32149');
+  const product = 'pkg:oci/test?repository_url=ghcr.io%2Fzaphiro-technologies%2Ftest';
+  const result = await runAction([current], {
+    files: {
+      '.vex/dependabot.openvex.json': {
+        '@context': 'https://openvex.dev/ns/v0.2.0',
+        version: 1,
+        statements: [{
+          status_notes: `dependabot-alert:${current.html_url}`,
+          products: [{
+            '@id': product,
+            subcomponents: [{ '@id': 'pkg:golang/golang.org/x/text@v0.3.2' }],
+          }],
+          status: 'under_investigation',
+        }],
+      },
+    },
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(outputValue(result.output, 'changed'), 'true');
+  assert.equal(outputValue(result.output, 'vex-changed'), 'false');
+  assert.equal(result.ledger.alerts.length, 1);
 });
 
 test('fails when a dismissal record has no package identity', async () => {

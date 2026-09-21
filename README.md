@@ -5,12 +5,16 @@ Dependabot alerts. It preserves historical dismissal metadata, derives product
 PURLs when configured to do so, updates the repository-owned VEX document, and
 emits safe outputs for a labelled candidate pull request.
 
-The action deliberately generates `under_investigation` statements by default.
-Dismissal reasons are mapped as follows:
+The action deliberately generates `under_investigation` statements for every
+dismissal. A Dependabot dismissal is preserved as review context, but it is not
+itself sufficient evidence for a `not_affected` assertion. A reviewer must
+update the candidate statement with the product-specific status and
+justification before merging.
 
-- `not_used` → `not_affected` / `vulnerable_code_not_present`
-- `inaccurate` → `not_affected` / `vulnerable_code_not_in_execute_path`
-- `tolerable_risk` → `not_affected` / `inline_mitigations_already_exist`
+Dismissal reasons are handled as follows:
+
+- `not_used`, `inaccurate`, and `tolerable_risk` → `under_investigation`, with
+  the original reason and comment retained in the ledger and statement notes
 - `no_bandwidth` → no VEX statement; the original alert receives a comment
   stating that this is not a security assessment
 

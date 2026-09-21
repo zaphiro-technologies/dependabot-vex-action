@@ -18,7 +18,7 @@ author: Zaphiro Technologies
 
 inputs:
   github-token:
-    description: Token used to read Dependabot alerts and create the candidate pull request
+    description: Token used to read Dependabot alerts and annotate no_bandwidth dismissals
     required: true
   product-purls:
     description: Newline-separated PURLs for products covered by the VEX statements
@@ -37,7 +37,7 @@ inputs:
     required: false
     default: .vex/dependabot-dismissals.json
   base-branch:
-    description: Branch from which the candidate branch and pull request are created
+    description: Branch used as the base for the candidate changes and pull request
     required: false
     default: main
   candidate-branch:
@@ -49,10 +49,6 @@ outputs:
     description: Whether the VEX or dismissal ledger changed
   candidate-branch:
     description: Candidate branch used by the action
-  pull-request-number:
-    description: Number of the created or updated pull request
-  pull-request-url:
-    description: URL of the created or updated pull request
   vulnerability-codes:
     description: Vulnerability identifiers included in the candidate PR
   pull-request-title:
