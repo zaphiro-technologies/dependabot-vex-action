@@ -10,6 +10,7 @@ header:
   paths-ignore:
     - ".github"
     - "**/*.{md,MD}"
+    - "LICENSE"
     - "package.json"
 
   comment: on-failure
