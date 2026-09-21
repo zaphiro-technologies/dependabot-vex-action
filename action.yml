@@ -9,15 +9,15 @@ inputs:
   alerts-token:
     description: Optional token with Dependabot alerts write permission, required to annotate no_bandwidth alerts
     required: false
-    default: ''
+    default: ""
   product-purls:
     description: Newline-separated PURLs for products covered by the VEX statements
     required: false
-    default: ''
+    default: ""
   image-name:
     description: GHCR image name used when product-purls is omitted
     required: false
-    default: ''
+    default: ""
   vex-path:
     description: Path of the repository-owned OpenVEX document
     required: false
@@ -33,7 +33,7 @@ inputs:
   candidate-branch:
     description: Candidate branch name; defaults to automation/dependabot-vex-${GITHUB_RUN_ID}
     required: false
-    default: ''
+    default: ""
 outputs:
   changed:
     description: Whether the VEX or dismissal ledger changed

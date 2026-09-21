@@ -22,5 +22,5 @@ jobs:
     uses: zaphiro-technologies/github-workflows/.github/workflows/new-release.yaml@improve-release-evidences
     with:
       tag: ${{ inputs.tag }}
-#      dependency-scan: ${{ inputs.dependency-scan }}
+    #      dependency-scan: ${{ inputs.dependency-scan }}
     secrets: inherit
