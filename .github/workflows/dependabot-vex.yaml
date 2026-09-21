@@ -1,0 +1,20 @@
+name: Dependabot VEX
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  vulnerability-alerts: read
+
+jobs:
+  generate:
+    uses: zaphiro-technologies/github-workflows/.github/workflows/dependabot-vex.yaml@improve-release-evidences
+    with:
+      base-branch: main
+      auto-not-affected-reason: not_used
+    secrets: inherit

@@ -1,0 +1,16 @@
+{
+  "name": "dependabot-vex-action",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "packageManager": "yarn@4.9.1",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "fix": "node --check src/main.js && node --check test/main.test.js",
+    "test": "node --test",
+    "typecheck": "node --check src/main.js && node --check test/main.test.js"
+  }
+}

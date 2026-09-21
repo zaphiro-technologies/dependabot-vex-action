@@ -1,0 +1,59 @@
+name: Dependabot VEX candidates
+description: Generate reviewed OpenVEX candidates from dismissed Dependabot alerts
+author: Zaphiro Technologies
+
+inputs:
+  github-token:
+    description: Token used to read Dependabot alerts and create the candidate pull request
+    required: true
+  alerts-token:
+    description: Optional token with Dependabot alerts write permission, required to annotate no_bandwidth alerts
+    required: false
+    default: ''
+  product-purls:
+    description: Newline-separated PURLs for products covered by the VEX statements
+    required: false
+    default: ''
+  image-name:
+    description: GHCR image name used when product-purls is omitted
+    required: false
+    default: ''
+  vex-path:
+    description: Path of the repository-owned OpenVEX document
+    required: false
+    default: .vex/dependabot.openvex.json
+  dismissal-ledger-path:
+    description: Path of the historical Dependabot dismissal ledger
+    required: false
+    default: .vex/dependabot-dismissals.json
+  base-branch:
+    description: Branch from which the candidate branch and pull request are created
+    required: false
+    default: main
+  candidate-branch:
+    description: Candidate branch name; defaults to automation/dependabot-vex-${GITHUB_RUN_ID}
+    required: false
+    default: ''
+outputs:
+  changed:
+    description: Whether the VEX or dismissal ledger changed
+  candidate-branch:
+    description: Candidate branch used by the action
+  pull-request-number:
+    description: Number of the created or updated pull request
+  pull-request-url:
+    description: URL of the created or updated pull request
+  vulnerability-codes:
+    description: Vulnerability identifiers included in the candidate PR
+  pull-request-title:
+    description: Safe title output for create-pull-request
+  pull-request-body:
+    description: Safe body output for create-pull-request
+  vex-changed:
+    description: Whether the VEX document changed
+  skipped-alerts:
+    description: Dependabot alert numbers skipped because their reason was no_bandwidth
+
+runs:
+  using: node24
+  main: src/main.js

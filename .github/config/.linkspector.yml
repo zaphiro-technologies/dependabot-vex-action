@@ -1,0 +1,17 @@
+# https://github.com/UmbrellaDocs/linkspector?tab=readme-ov-file#configuration
+dirs:
+  - .
+useGitIgnore: true
+aliveStatusCodes:
+  - 200
+  - 201
+  - 204
+  - 206
+  - 429
+ignorePatterns:
+  - pattern: "^https://localhost"
+  - pattern: "^https://github.com/orgs/zaphiro-technologies/"
+  - pattern: "^https://github.com/zaphiro-technologies/"
+  - pattern: "^http://127.0.0.1"
+excludedDirs:
+  - vendor
