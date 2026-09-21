@@ -11,7 +11,8 @@ Dismissal reasons are mapped as follows:
 - `not_used` → `not_affected` / `vulnerable_code_not_present`
 - `inaccurate` → `not_affected` / `vulnerable_code_not_in_execute_path`
 - `tolerable_risk` → `not_affected` / `inline_mitigations_already_exist`
-- `no_bandwidth` → no VEX statement; the original alert receives a comment stating that this is not a security assessment
+- `no_bandwidth` → no VEX statement; the original alert receives a comment
+  stating that this is not a security assessment
 
 The action emits safe `pull-request-title` and `pull-request-body` outputs. The
 calling workflow uses those outputs with `peter-evans/create-pull-request`.
@@ -58,13 +59,13 @@ steps:
 ```
 
 When `product-purls` is empty, the action includes the GHCR OCI PURL and
-automatically derives PURLs from `go.mod`, `pyproject.toml`, and
-`package.json` when those files are present.
+automatically derives PURLs from `go.mod`, `pyproject.toml`, and `package.json`
+when those files are present.
 
 ## Development
 
-The action is a dependency-free JavaScript action running on Node.js 24. Run
-the same checks used by the shared JavaScript workflow with:
+The action is a dependency-free JavaScript action running on Node.js 24. Run the
+same checks used by the shared JavaScript workflow with:
 
 ```bash
 yarn install --immutable
