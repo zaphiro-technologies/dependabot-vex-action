@@ -10,7 +10,10 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "fix": "node --check src/main.js && node --check test/main.test.js",
-    "test": "node --test",
+    "test": "yarn test:unit",
+    "test:unit": "node --test",
+    "test:unit:cov": "rm -rf coverage && mkdir -p coverage && node --test --experimental-test-coverage --test-coverage-include='src/**/*.js' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info",
+    "test:cov": "yarn test:unit:cov",
     "typecheck": "node --check src/main.js && node --check test/main.test.js"
   }
 }

@@ -83,7 +83,7 @@ async function allDismissedAlerts() {
   const alerts = [];
   let endpoint = `/repos/${owner}/${repo}/dependabot/alerts?state=dismissed&per_page=100`;
   while (endpoint) {
-    const response = await github(endpoint);
+    const response = await github(endpoint, {}, alertsToken || token);
     alerts.push(...(response.body || []));
     const next = response.headers.get('link')?.match(/<([^>]+)>; rel="next"/);
     endpoint = next ? new URL(next[1]).pathname + new URL(next[1]).search : null;

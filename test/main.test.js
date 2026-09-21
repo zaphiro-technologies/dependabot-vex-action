@@ -44,7 +44,12 @@ async function runAction(alerts, { alertsToken = '' } = {}) {
   const server = http.createServer(async (request, response) => {
     let body = '';
     for await (const chunk of request) body += chunk;
-    requests.push({ method: request.method, url: request.url, body });
+    requests.push({
+      method: request.method,
+      url: request.url,
+      body,
+      authorization: request.headers.authorization,
+    });
     if (request.method === 'GET' && request.url?.startsWith('/repos/zaphiro-technologies/test/dependabot/alerts')) {
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify(alerts));
@@ -138,6 +143,16 @@ test('uses the requested singular PR title for one CVE', async () => {
     'Add VEX statement for CVE-2022-32149 (example.org/widget)',
   );
   assert.match(outputValue(result.output, 'pull-request-body'), /security\/dependabot\/4/);
+});
+
+test('uses alerts-token when reading Dependabot alerts', async () => {
+  const result = await runAction([alert(6, 'not_used', 'CVE-2022-32149')], {
+    alertsToken: 'alerts-read-token',
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  const getAlerts = result.requests.find(request => request.method === 'GET');
+  assert.equal(getAlerts?.authorization, 'Bearer alerts-read-token');
 });
 
 test('skips no_bandwidth and annotates the original alert', async () => {

@@ -19,8 +19,11 @@ calling workflow uses those outputs with `peter-evans/create-pull-request`.
 ## Usage
 
 The calling workflow must check out the repository before invoking the action.
-It needs `contents: write`, `issues: write`, `pull-requests: write`, and
-`vulnerability-alerts: read` permissions.
+It needs `contents: write`, `issues: write`, and `pull-requests: write`
+permissions. The token passed as `github-token` must also be authorized to
+read Dependabot alerts. On installations where the workflow token cannot be
+given Dependabot-alert access, pass a GitHub App or personal access token via
+`alerts-token`.
 
 If dismissed alerts can use `no_bandwidth`, also pass `alerts-token` using a
 GitHub App or token with Dependabot alerts write permission. GitHub's
@@ -31,7 +34,6 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
-  vulnerability-alerts: read
 
 steps:
   - uses: actions/checkout@v7.0.1
@@ -42,7 +44,8 @@ steps:
     uses: zaphiro-technologies/dependabot-vex-action@v1
     with:
       github-token: ${{ github.token }}
-      # Required only when a dismissed alert has reason no_bandwidth:
+      # Use a token with Dependabot alerts read access when github.token cannot
+      # read alerts; it also needs write access when a dismissal is no_bandwidth.
       alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
       base-branch: main
 
@@ -71,6 +74,9 @@ yarn install --immutable
 make test
 yarn build
 ```
+
+`make test` runs the unit tests with Node.js coverage enabled and generates
+`coverage/lcov.info` for Sonar.
 
 The direct local test commands are also available:
 

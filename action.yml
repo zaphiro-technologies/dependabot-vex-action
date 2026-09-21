@@ -7,7 +7,7 @@ inputs:
     description: Token used to read Dependabot alerts and create the candidate pull request
     required: true
   alerts-token:
-    description: Optional token with Dependabot alerts write permission, required to annotate no_bandwidth alerts
+    description: Optional token with Dependabot alerts read permission; write permission is required to annotate no_bandwidth alerts
     required: false
     default: ''
   product-purls:

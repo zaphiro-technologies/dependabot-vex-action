@@ -4,4 +4,4 @@ ci-pre-build:
 	@mkdir -p build
 
 test:
-	yarn test
+	yarn test:cov
