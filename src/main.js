@@ -25,13 +25,14 @@ function input(name, fallback = '') {
 }
 
 function fail(message) {
-  console.error(`::error::${message}`);
+  const safeMessage = String(message).replaceAll(/[\u0000-\u001F\u007F]/g, ' ');
+  console.error(`::error::${safeMessage}`);
   process.exit(1);
 }
 
 function output(name, value) {
   if (!githubOutput) return;
-  const delimiter = `VEX_${name.replaceAll(/[^A-Za-z0-9_]/g, '_')}_${Date.now()}`;
+  const delimiter = `VEX_${name.replaceAll(/\W/g, '_')}_${Date.now()}`;
   fs.appendFileSync(githubOutput, `${name}<<${delimiter}\n${value ?? ''}\n${delimiter}\n`);
 }
 
@@ -58,12 +59,11 @@ function writeJson(file, value) {
 async function github(endpoint, options = {}, authToken = token) {
   const response = await fetch(`${apiBase}${endpoint}`, {
     ...options,
-    headers: {
+    headers: Object.assign({
       accept: 'application/vnd.github+json',
       authorization: `Bearer ${authToken}`,
       'x-github-api-version': '2022-11-28',
-      ...(options.headers || {}),
-    },
+    }, options.headers),
   });
   const text = await response.text();
   let body;
@@ -79,33 +79,74 @@ async function github(endpoint, options = {}, authToken = token) {
   return { body, headers: response.headers };
 }
 
+function nextPage(linkHeader) {
+  if (!linkHeader) return null;
+  for (const link of linkHeader.split(',')) {
+    if (!link.includes('rel="next"')) continue;
+    const start = link.indexOf('<');
+    const end = link.indexOf('>', start + 1);
+    if (start === -1 || end === -1) return null;
+    const url = new URL(link.slice(start + 1, end));
+    return url.pathname + url.search;
+  }
+  return null;
+}
+
 async function allDismissedAlerts() {
   const alerts = [];
   let endpoint = `/repos/${owner}/${repo}/dependabot/alerts?state=dismissed&per_page=100`;
   while (endpoint) {
     const response = await github(endpoint, {}, alertsToken || token);
     alerts.push(...(response.body || []));
-    const next = response.headers.get('link')?.match(/<([^>]+)>; rel="next"/);
-    endpoint = next ? new URL(next[1]).pathname + new URL(next[1]).search : null;
+    endpoint = nextPage(response.headers.get('link'));
   }
   return alerts;
+}
+
+function section(text, heading) {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex(line => line.trim() === heading);
+  if (start === -1) return '';
+  const result = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim().startsWith('[')) break;
+    result.push(line);
+  }
+  return result.join('\n');
+}
+
+function tomlString(text, key) {
+  const line = text.split(/\r?\n/).find(item => {
+    const trimmed = item.trim();
+    const separator = trimmed.indexOf('=');
+    return separator !== -1 && trimmed.slice(0, separator).trim() === key;
+  });
+  if (!line) return '';
+  const value = line.slice(line.indexOf('=') + 1).trim();
+  const quote = value[0];
+  return (quote === '"' || quote === "'") && value.endsWith(quote)
+    ? value.slice(1, -1)
+    : '';
 }
 
 function deriveSourcePurls() {
   const purls = [];
   const goMod = absolute('go.mod');
   if (fs.existsSync(goMod)) {
-    const match = fs.readFileSync(goMod, 'utf8').match(/^\s*module\s+(\S+)\s*$/m);
-    if (match) purls.push(`pkg:golang/${match[1]}`);
+    const module = fs.readFileSync(goMod, 'utf8')
+      .split(/\r?\n/)
+      .find(line => line.trim().startsWith('module '))
+      ?.trim()
+      .slice('module '.length)
+      .trim();
+    if (module) purls.push(`pkg:golang/${module}`);
   }
 
   const pyproject = absolute('pyproject.toml');
   if (fs.existsSync(pyproject)) {
     const text = fs.readFileSync(pyproject, 'utf8');
-    const projectSection = text.match(/\[project\]([\s\S]*?)(?=\n\[|$)/)?.[1] || '';
-    const poetrySection = text.match(/\[tool\.poetry\]([\s\S]*?)(?=\n\[|$)/)?.[1] || '';
-    const name = projectSection.match(/^\s*name\s*=\s*["']([^"']+)["']/m)?.[1]
-      || poetrySection.match(/^\s*name\s*=\s*["']([^"']+)["']/m)?.[1];
+    const name = tomlString(section(text, '[project]'), 'name')
+      || tomlString(section(text, '[tool.poetry]'), 'name');
     if (name) purls.push(`pkg:pypi/${name.replaceAll(/[-_.]+/g, '-').toLowerCase()}`);
   }
 
@@ -113,7 +154,8 @@ function deriveSourcePurls() {
   if (fs.existsSync(packageJson)) {
     try {
       const name = JSON.parse(fs.readFileSync(packageJson, 'utf8')).name;
-      if (name) purls.push(`pkg:npm/${name.startsWith('@') ? `%40${name.slice(1)}` : name}`);
+      const packageName = name?.startsWith('@') ? `%40${name.slice(1)}` : name;
+      if (packageName) purls.push(`pkg:npm/${packageName}`);
     } catch (error) {
       console.warn(`Warning: unable to parse package.json: ${error.message}`);
     }
@@ -139,7 +181,7 @@ function productPurls() {
   const encodedRepository = imageRepository.replaceAll('/', '%2F');
   const derived = [`pkg:oci/${imageName}?repository_url=${encodedRepository}`, ...deriveSourcePurls()];
   console.log('Using automatically derived product PURLs:');
-  for (const purl of [...new Set(derived)]) console.log(`  ${purl}`);
+  for (const purl of new Set(derived)) console.log(`  ${purl}`);
   return [...new Set(derived)];
 }
 
@@ -274,8 +316,8 @@ async function main() {
   const alerts = await allDismissedAlerts();
   const normalized = alerts.map(normalizeAlert);
   const skipped = normalized.filter(record => record.dismissed_reason === 'no_bandwidth');
-  for (const alert of alerts.filter(item => item.dismissed_reason === 'no_bandwidth')) {
-    await annotateNoBandwidth(alert);
+  for (const alert of alerts) {
+    if (alert.dismissed_reason === 'no_bandwidth') await annotateNoBandwidth(alert);
   }
 
   const existingLedger = readJson(ledgerPath, { version: 1, alerts: [] });
@@ -290,7 +332,8 @@ async function main() {
   const records = ledger.alerts || [];
   const invalid = records.filter(record => !record.package?.ecosystem || !record.package?.name);
   if (invalid.length) {
-    fail(`Dismissal records are missing package identity: ${invalid.map(record => `alert=${record.alert}`).join(', ')}`);
+    const invalidAlerts = invalid.map(record => `alert=${record.alert}`).join(', ');
+    fail(`Dismissal records are missing package identity: ${invalidAlerts}`);
   }
 
   const existingVex = readJson(vexPath, {
@@ -351,11 +394,13 @@ async function main() {
   const vulnerabilityList = vulnerabilityRecords.length
     ? vulnerabilityRecords.map(record => `- ${record.vulnerability.name} (${record.package.name}) — ${record.url}`).join('\n')
     : '- Existing VEX product scope updated';
-  const title = vulnerabilityRecords.length === 1
-    ? `Add VEX statement for ${vulnerabilityRecords[0].vulnerability.name} (${vulnerabilityRecords[0].package.name})`
-    : vulnerabilityRecords.length > 1
-      ? `Add VEX statements for ${vulnerabilityCodes.join(', ')}`
-      : 'Update VEX product scope';
+  let title = 'Update VEX product scope';
+  if (vulnerabilityRecords.length === 1) {
+    const record = vulnerabilityRecords[0];
+    title = `Add VEX statement for ${record.vulnerability.name} (${record.package.name})`;
+  } else if (vulnerabilityRecords.length > 1) {
+    title = `Add VEX statements for ${vulnerabilityCodes.join(', ')}`;
+  }
   const body = [
     'This pull request adds reviewed OpenVEX statements generated from dismissed Dependabot alerts.',
     '',
@@ -384,4 +429,8 @@ async function main() {
   if (!changed) console.log('No VEX document changes required');
 }
 
-main().catch(error => fail(error.stack || error.message || String(error)));
+try {
+  await main();
+} catch (error) {
+  fail(error.stack || error.message || String(error));
+}

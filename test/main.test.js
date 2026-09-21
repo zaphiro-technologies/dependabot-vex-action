@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { once } from 'node:events';
@@ -37,10 +37,23 @@ function alert(number, reason, cve, packageName = 'golang.org/x/text') {
   };
 }
 
-async function runAction(alerts, { alertsToken = '' } = {}) {
+async function runAction(alerts, {
+  alertsToken = '',
+  files = {},
+  imageName,
+  productPurls = 'pkg:oci/test?repository_url=ghcr.io%2Fzaphiro-technologies%2Ftest',
+  githubOutput = true,
+  nextAlerts,
+  serverError,
+} = {}) {
   const workspace = await mkdtemp(path.resolve('test-workspace-'));
   const output = path.join(workspace, 'github-output');
   const requests = [];
+  for (const [file, contents] of Object.entries(files)) {
+    const target = path.join(workspace, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, typeof contents === 'string' ? contents : JSON.stringify(contents));
+  }
   const server = http.createServer(async (request, response) => {
     let body = '';
     for await (const chunk of request) body += chunk;
@@ -51,8 +64,19 @@ async function runAction(alerts, { alertsToken = '' } = {}) {
       authorization: request.headers.authorization,
     });
     if (request.method === 'GET' && request.url?.startsWith('/repos/zaphiro-technologies/test/dependabot/alerts')) {
+      if (serverError) {
+        response.statusCode = serverError.status;
+        response.end(serverError.body);
+        return;
+      }
       response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify(alerts));
+      if (nextAlerts && !request.url.includes('page=2')) {
+        response.setHeader(
+          'link',
+          '<http://127.0.0.1:' + server.address().port + '/repos/zaphiro-technologies/test/dependabot/alerts?page=2>; rel="next"',
+        );
+      }
+      response.end(JSON.stringify(request.url.includes('page=2') ? nextAlerts : alerts));
       return;
     }
     if (request.method === 'PATCH' && request.url?.includes('/dependabot/alerts/')) {
@@ -83,8 +107,10 @@ async function runAction(alerts, { alertsToken = '' } = {}) {
         INPUT_BASE_BRANCH: 'main',
         INPUT_DISMISSAL_LEDGER_PATH: '.vex/dependabot-dismissals.json',
         INPUT_GITHUB_TOKEN: 'read-token',
-        INPUT_PRODUCT_PURLS: 'pkg:oci/test?repository_url=ghcr.io%2Fzaphiro-technologies%2Ftest',
+        INPUT_PRODUCT_PURLS: productPurls,
         INPUT_VEX_PATH: '.vex/dependabot.openvex.json',
+        ...(imageName === undefined ? {} : { INPUT_IMAGE_NAME: imageName }),
+        ...(githubOutput ? {} : { GITHUB_OUTPUT: '' }),
       },
     });
     let stdout = '';
@@ -166,4 +192,82 @@ test('skips no_bandwidth and annotates the original alert', async () => {
   const patch = result.requests.find(request => request.method === 'PATCH');
   assert.ok(patch);
   assert.match(JSON.parse(patch.body).dismissed_comment, /not a security assessment/);
+});
+
+test('paginates alerts and derives product PURLs from supported project files', async () => {
+  const result = await runAction([alert(7, 'not_used', 'CVE-2022-32149')], {
+    nextAlerts: [alert(8, 'inaccurate', 'CVE-2021-38561')],
+    productPurls: '',
+    files: {
+      'go.mod': 'module example.com/service\n',
+      'pyproject.toml': '[project]\nname = "example_service"\n\n[tool.poetry]\nname = "poetry-service"\n',
+      'package.json': JSON.stringify({ name: '@scope/example-service' }),
+    },
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.vex.statements.length, 2);
+  assert.equal(result.requests.filter(request => request.method === 'GET').length, 2);
+  assert.equal(result.vex.statements[0].products.length, 4);
+});
+
+test('updates retained statements and reports a scope-only change', async () => {
+  const existing = {
+    '@context': 'https://openvex.dev/ns/v0.2.0',
+    version: 1,
+    statements: [{
+      status_notes: 'dependabot-alert:https://github.com/zaphiro-technologies/test/security/dependabot/9',
+      products: [{ '@id': 'pkg:oci/old', subcomponents: [] }],
+    }],
+  };
+  const current = alert(9, 'not_used', 'CVE-2022-32149');
+  const result = await runAction([current], {
+    files: { '.vex/dependabot.openvex.json': existing },
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.vex.statements.length, 1);
+  assert.match(outputValue(result.output, 'pull-request-title'), /Update VEX product scope/);
+  assert.equal(result.vex.statements[0].products[0]['@id'], 'pkg:oci/test?repository_url=ghcr.io%2Fzaphiro-technologies%2Ftest');
+});
+
+test('handles an empty alert list without creating a VEX document', async () => {
+  const result = await runAction([], { githubOutput: false });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.vex, null);
+  assert.equal(result.output, '');
+});
+
+test('fails when a dismissal record has no package identity', async () => {
+  const incomplete = alert(10, 'not_used', 'CVE-2022-32149');
+  delete incomplete.dependency;
+  delete incomplete.security_vulnerability;
+  const result = await runAction([incomplete]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /missing package identity/);
+});
+
+test('requires a write-capable alerts token for no_bandwidth annotations', async () => {
+  const result = await runAction([alert(11, 'no_bandwidth', 'CVE-2022-32149')]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /alerts-token.*write permission/);
+});
+
+test('sanitizes API error messages before emitting workflow annotations', async () => {
+  const result = await runAction([], {
+    serverError: { status: 500, body: 'upstream failure\n::warning::injected' },
+  });
+
+  assert.equal(result.code, 1);
+  assert.doesNotMatch(result.stderr, /\n::warning::/);
+});
+
+test('rejects an invalid automatically derived image name', async () => {
+  const result = await runAction([], { imageName: 'invalid image', productPurls: '' });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /image-name must be non-empty/);
 });
