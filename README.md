@@ -21,9 +21,9 @@ calling workflow uses those outputs with `peter-evans/create-pull-request`.
 
 The calling workflow must check out the repository before invoking the action.
 It needs `contents: write`, `issues: write`, and `pull-requests: write`
-permissions. The token passed as `github-token` must also be authorized to
-read Dependabot alerts. On installations where the workflow token cannot be
-given Dependabot-alert access, pass a GitHub App or personal access token via
+permissions. The token passed as `github-token` must also be authorized to read
+Dependabot alerts. On installations where the workflow token cannot be given
+Dependabot-alert access, pass a GitHub App or personal access token via
 `alerts-token`.
 
 If dismissed alerts can use `no_bandwidth`, also pass `alerts-token` using a
