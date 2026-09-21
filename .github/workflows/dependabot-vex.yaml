@@ -15,5 +15,4 @@ jobs:
     uses: zaphiro-technologies/github-workflows/.github/workflows/dependabot-vex.yaml@improve-release-evidences
     with:
       base-branch: main
-      auto-not-affected-reason: not_used
     secrets: inherit
