@@ -12,5 +12,6 @@ header:
     - "**/*.{md,MD}"
     - "LICENSE"
     - "package.json"
+    - "yarn.lock"
 
   comment: on-failure
