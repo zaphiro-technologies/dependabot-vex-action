@@ -20,7 +20,6 @@ import path from 'node:path';
 const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
 const repository = process.env.GITHUB_REPOSITORY;
 const token = input('github-token');
-const alertsToken = input('alerts-token');
 const apiBase = process.env.GITHUB_API_URL || 'https://api.github.com';
 const serverUrl = process.env.GITHUB_SERVER_URL || 'https://github.com';
 
@@ -36,8 +35,10 @@ const ledgerPath = input('dismissal-ledger-path', '.vex/dependabot-dismissals.js
 const githubOutput = process.env.GITHUB_OUTPUT;
 
 function input(name, fallback = '') {
-  const key = `INPUT_${name.toUpperCase().replaceAll('-', '_')}`;
-  return process.env[key] ?? fallback;
+  const upper = name.toUpperCase();
+  return process.env[`INPUT_${upper}`]
+    ?? process.env[`INPUT_${upper.replaceAll('-', '_')}`]
+    ?? fallback;
 }
 
 function fail(message) {
@@ -113,7 +114,7 @@ async function allDismissedAlerts() {
   const alerts = [];
   let endpoint = `/repos/${owner}/${repo}/dependabot/alerts?state=dismissed&per_page=100`;
   while (endpoint) {
-    const response = await github(endpoint, {}, alertsToken || token);
+    const response = await github(endpoint);
     alerts.push(...(response.body || []));
     endpoint = nextPage(response.headers.get('link'));
   }
@@ -274,9 +275,6 @@ async function annotateNoBandwidth(alert) {
   const note = '[dependabot-vex-action] This dismissal is not a security assessment; no VEX statement was generated.';
   const original = alert.dismissed_comment || '';
   if (original.includes(note)) return;
-  if (!alertsToken) {
-    fail(`Dependabot alert ${alert.number} has reason no_bandwidth; alerts-token with Dependabot alerts write permission is required to annotate it`);
-  }
   const comment = original ? `${original}\n\n${note}` : note;
   await github(`/repos/${owner}/${repo}/dependabot/alerts/${alert.number}`, {
     method: 'PATCH',
@@ -286,7 +284,7 @@ async function annotateNoBandwidth(alert) {
       dismissed_reason: 'no_bandwidth',
       dismissed_comment: comment,
     }),
-  }, alertsToken);
+  });
   console.log(`Annotated Dependabot alert ${alert.number}: no VEX security assessment`);
 }
 

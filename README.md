@@ -21,14 +21,10 @@ calling workflow uses those outputs with `peter-evans/create-pull-request`.
 
 The calling workflow must check out the repository before invoking the action.
 It needs `contents: write`, `issues: write`, and `pull-requests: write`
-permissions. The token passed as `github-token` must also be authorized to read
-Dependabot alerts. On installations where the workflow token cannot be given
-Dependabot-alert access, pass a GitHub App or personal access token via
-`alerts-token`.
-
-If dismissed alerts can use `no_bandwidth`, also pass `alerts-token` using a
-GitHub App or token with Dependabot alerts write permission. GitHub's
-`GITHUB_TOKEN` supports reading Dependabot alerts but not updating them.
+permissions. The token passed as `github-token` must be a GitHub App
+installation token with Dependabot alerts write permission when dismissed
+alerts can use `no_bandwidth`; the standard `GITHUB_TOKEN` cannot update those
+alerts.
 
 ```yaml
 permissions:
@@ -41,13 +37,20 @@ steps:
     with:
       fetch-depth: 0
 
+  - id: app-token
+    uses: actions/create-github-app-token@v3
+    with:
+      app-id: ${{ secrets.APP_ID }}
+      private-key: ${{ secrets.APP_SECRET }}
+      permission-contents: write
+      permission-issues: write
+      permission-pull-requests: write
+      permission-vulnerability-alerts: write
+
   - id: vex
     uses: zaphiro-technologies/dependabot-vex-action@v1
     with:
-      github-token: ${{ github.token }}
-      # Use a token with Dependabot alerts read access when github.token cannot
-      # read alerts; it also needs write access when a dismissal is no_bandwidth.
-      alerts-token: ${{ secrets.DEPENDABOT_ALERTS_TOKEN }}
+      github-token: ${{ steps.app-token.outputs.token }}
       base-branch: main
 
   - uses: peter-evans/create-pull-request@v7

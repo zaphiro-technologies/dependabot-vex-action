@@ -54,7 +54,7 @@ function alert(number, reason, cve, packageName = 'golang.org/x/text') {
 }
 
 async function runAction(alerts, {
-  alertsToken = '',
+  token = 'read-token',
   files = {},
   imageName,
   productPurls = 'pkg:oci/test?repository_url=ghcr.io%2Fzaphiro-technologies%2Ftest',
@@ -119,10 +119,9 @@ async function runAction(alerts, {
         GITHUB_RUN_ID: '12345',
         GITHUB_SERVER_URL: 'https://github.com',
         GITHUB_WORKSPACE: workspace,
-        INPUT_ALERTS_TOKEN: alertsToken,
         INPUT_BASE_BRANCH: 'main',
         INPUT_DISMISSAL_LEDGER_PATH: '.vex/dependabot-dismissals.json',
-        INPUT_GITHUB_TOKEN: 'read-token',
+        'INPUT_GITHUB-TOKEN': token || '',
         INPUT_PRODUCT_PURLS: productPurls,
         INPUT_VEX_PATH: '.vex/dependabot.openvex.json',
         ...(imageName === undefined ? {} : { INPUT_IMAGE_NAME: imageName }),
@@ -187,19 +186,19 @@ test('uses the requested singular PR title for one CVE', async () => {
   assert.match(outputValue(result.output, 'pull-request-body'), /security\/dependabot\/4/);
 });
 
-test('uses alerts-token when reading Dependabot alerts', async () => {
+test('uses github-token when reading Dependabot alerts', async () => {
   const result = await runAction([alert(6, 'not_used', 'CVE-2022-32149')], {
-    alertsToken: 'alerts-read-token',
+    token: 'app-token',
   });
 
   assert.equal(result.code, 0, result.stderr);
   const getAlerts = result.requests.find(request => request.method === 'GET');
-  assert.equal(getAlerts?.authorization, 'Bearer alerts-read-token');
+  assert.equal(getAlerts?.authorization, 'Bearer app-token');
 });
 
 test('skips no_bandwidth and annotates the original alert', async () => {
   const result = await runAction([alert(5, 'no_bandwidth', 'CVE-2022-32149')], {
-    alertsToken: 'write-token',
+    token: 'app-token',
   });
 
   assert.equal(result.code, 0, result.stderr);
@@ -263,13 +262,6 @@ test('fails when a dismissal record has no package identity', async () => {
 
   assert.equal(result.code, 1);
   assert.match(result.stderr, /missing package identity/);
-});
-
-test('requires a write-capable alerts token for no_bandwidth annotations', async () => {
-  const result = await runAction([alert(11, 'no_bandwidth', 'CVE-2022-32149')]);
-
-  assert.equal(result.code, 1);
-  assert.match(result.stderr, /alerts-token.*write permission/);
 });
 
 test('sanitizes API error messages before emitting workflow annotations', async () => {
