@@ -59,11 +59,12 @@ function writeJson(file, value) {
 async function github(endpoint, options = {}, authToken = token) {
   const response = await fetch(`${apiBase}${endpoint}`, {
     ...options,
-    headers: Object.assign({
+    headers: {
       accept: 'application/vnd.github+json',
       authorization: `Bearer ${authToken}`,
       'x-github-api-version': '2022-11-28',
-    }, options.headers),
+      ...options.headers,
+    },
   });
   const text = await response.text();
   let body;
@@ -309,17 +310,13 @@ function vexCandidate(record, products) {
   };
 }
 
-async function main() {
-  const products = productPurls();
-  if (!products.length) fail('product-purls must contain at least one non-empty PURL');
-
-  const alerts = await allDismissedAlerts();
-  const normalized = alerts.map(normalizeAlert);
-  const skipped = normalized.filter(record => record.dismissed_reason === 'no_bandwidth');
+async function annotateSkippedAlerts(alerts) {
   for (const alert of alerts) {
     if (alert.dismissed_reason === 'no_bandwidth') await annotateNoBandwidth(alert);
   }
+}
 
+function loadLedger(normalized) {
   const existingLedger = readJson(ledgerPath, { version: 1, alerts: [] });
   // no_bandwidth is recorded on the Dependabot alert itself via
   // dismissed_comment, but is intentionally not added to the VEX ledger.
@@ -335,38 +332,40 @@ async function main() {
     const invalidAlerts = invalid.map(record => `alert=${record.alert}`).join(', ');
     fail(`Dismissal records are missing package identity: ${invalidAlerts}`);
   }
+  return records;
+}
 
-  const existingVex = readJson(vexPath, {
-    '@context': 'https://openvex.dev/ns/v0.2.0',
-    version: 1,
-    statements: [],
-  });
-  const existingStatements = existingVex.statements || [];
-  const existingMarkers = new Set(existingStatements.map(statement =>
-    (statement.status_notes || '').split('\n')[0]));
-  const eligible = records.filter(record => !record.skipped && record.dismissed_reason !== 'no_bandwidth');
+function retargetStatement(statement, eligible, products) {
+  const notes = statement.status_notes || '';
+  if (!notes.startsWith('dependabot-alert:')) return statement;
+  const record = eligible.find(item => notes.startsWith(marker(item)));
+  if (!record) return statement;
+  return {
+    ...statement,
+    products: products.map(product => ({
+      '@id': product,
+      subcomponents: [{ '@id': dependencyPurl(record) }],
+    })),
+  };
+}
+
+function retainStatements(existingStatements, eligible, products) {
   const activeMarkers = new Set(eligible.map(marker));
-
-  const retained = existingStatements
+  return existingStatements
     .filter(statement => {
       const notes = statement.status_notes || '';
       if (!notes.startsWith('dependabot-alert:')) return true;
       return activeMarkers.has(notes.split('\n')[0]);
     })
-    .map(statement => {
-      const notes = statement.status_notes || '';
-      if (!notes.startsWith('dependabot-alert:')) return statement;
-      const record = eligible.find(item => notes.startsWith(marker(item)));
-      if (!record) return statement;
-      return {
-        ...statement,
-        products: products.map(product => ({
-          '@id': product,
-          subcomponents: [{ '@id': dependencyPurl(record) }],
-        })),
-      };
-    });
+    .map(statement => retargetStatement(statement, eligible, products));
+}
 
+function buildVexDocument(existingVex, records, products) {
+  const existingStatements = existingVex.statements || [];
+  const existingMarkers = new Set(existingStatements.map(statement =>
+    (statement.status_notes || '').split('\n')[0]));
+  const eligible = records.filter(record => !record.skipped && record.dismissed_reason !== 'no_bandwidth');
+  const retained = retainStatements(existingStatements, eligible, products);
   const newRecords = eligible.filter(record => !existingMarkers.has(marker(record)));
   const newStatements = newRecords.map(record => vexCandidate(record, products));
   const statements = [...retained, ...newStatements];
@@ -387,20 +386,24 @@ async function main() {
     version: changed ? (existingVex.version || 0) + 1 : (existingVex.version || 1),
     statements,
   };
-  if (changed || fs.existsSync(absolute(vexPath))) writeJson(vexPath, vex);
+  return { changed, newRecords, statements, vex };
+}
 
-  const vulnerabilityRecords = newRecords;
-  const vulnerabilityCodes = [...new Set(vulnerabilityRecords.map(record => record.vulnerability.name))];
-  const vulnerabilityList = vulnerabilityRecords.length
-    ? vulnerabilityRecords.map(record => `- ${record.vulnerability.name} (${record.package.name}) — ${record.url}`).join('\n')
+function pullRequestDetails(newRecords, skipped) {
+  const vulnerabilityCodes = [...new Set(newRecords.map(record => record.vulnerability.name))];
+  const vulnerabilityList = newRecords.length
+    ? newRecords.map(record => `- ${record.vulnerability.name} (${record.package.name}) — ${record.url}`).join('\n')
     : '- Existing VEX product scope updated';
   let title = 'Update VEX product scope';
-  if (vulnerabilityRecords.length === 1) {
-    const record = vulnerabilityRecords[0];
+  if (newRecords.length === 1) {
+    const record = newRecords[0];
     title = `Add VEX statement for ${record.vulnerability.name} (${record.package.name})`;
-  } else if (vulnerabilityRecords.length > 1) {
+  } else if (newRecords.length > 1) {
     title = `Add VEX statements for ${vulnerabilityCodes.join(', ')}`;
   }
+  const skippedMessage = skipped.length
+    ? `Skipped alert(s) because their dismissal reason is no_bandwidth: ${skipped.map(record => record.alert).join(', ')}. The action annotated the original alert that this is not a security assessment and generated no VEX statement for it.`
+    : '';
   const body = [
     'This pull request adds reviewed OpenVEX statements generated from dismissed Dependabot alerts.',
     '',
@@ -409,10 +412,30 @@ async function main() {
     '',
     'Review each statement\'s product scope, vulnerability reachability, status, and justification before merging.',
     '',
-    skipped.length
-      ? `Skipped alert(s) because their dismissal reason is no_bandwidth: ${skipped.map(record => record.alert).join(', ')}. The action annotated the original alert that this is not a security assessment and generated no VEX statement for it.`
-      : '',
+    skippedMessage,
   ].filter(Boolean).join('\n');
+  return { body, title, vulnerabilityCodes };
+}
+
+async function main() {
+  const products = productPurls();
+  if (!products.length) fail('product-purls must contain at least one non-empty PURL');
+
+  const alerts = await allDismissedAlerts();
+  const normalized = alerts.map(normalizeAlert);
+  const skipped = normalized.filter(record => record.dismissed_reason === 'no_bandwidth');
+  await annotateSkippedAlerts(alerts);
+
+  const records = loadLedger(normalized);
+  const existingVex = readJson(vexPath, {
+    '@context': 'https://openvex.dev/ns/v0.2.0',
+    version: 1,
+    statements: [],
+  });
+  const { changed, newRecords, statements, vex } = buildVexDocument(existingVex, records, products);
+  if (changed || fs.existsSync(absolute(vexPath))) writeJson(vexPath, vex);
+
+  const { body, title, vulnerabilityCodes } = pullRequestDetails(newRecords, skipped);
 
   output('changed', changed ? 'true' : 'false');
   output('vex-changed', changed ? 'true' : 'false');
