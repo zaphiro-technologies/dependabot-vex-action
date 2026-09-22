@@ -28,8 +28,8 @@ if (!token) fail('github-token input is required');
 
 const [owner, repo] = repository.split('/');
 const baseBranch = input('base-branch', 'main');
-const candidateBranch = input('candidate-branch') ||
-  `automation/dependabot-vex-${process.env.GITHUB_RUN_ID || 'local'}`;
+const requestedCandidateBranch = input('candidate-branch');
+let candidateBranch = requestedCandidateBranch || 'automation/dependabot-vex';
 const vexPath = input('vex-path', '.vex/dependabot.openvex.json');
 const ledgerPath = input('dismissal-ledger-path', '.vex/dependabot-dismissals.json');
 const githubOutput = process.env.GITHUB_OUTPUT;
@@ -119,6 +119,24 @@ async function allDismissedAlerts() {
     endpoint = nextPage(response.headers.get('link'));
   }
   return alerts;
+}
+
+async function reuseExistingCandidateBranch() {
+  if (requestedCandidateBranch) return requestedCandidateBranch;
+
+  const endpoint = `/repos/${owner}/${repo}/pulls?state=open&base=${encodeURIComponent(baseBranch)}&per_page=100`;
+  const response = await github(endpoint);
+  const candidates = (response.body || [])
+    .filter(pullRequest =>
+      pullRequest.head?.repo?.full_name === repository
+      && pullRequest.head?.ref?.startsWith('automation/dependabot-vex'))
+    .sort((left, right) => (left.number || 0) - (right.number || 0));
+  const existing = candidates[0]?.head?.ref;
+  if (existing) {
+    console.log(`Reusing existing Dependabot VEX candidate branch: ${existing}`);
+    return existing;
+  }
+  return candidateBranch;
 }
 
 function section(text, heading) {
@@ -443,6 +461,7 @@ function pullRequestDetails(newRecords, skipped, ledgerChanged, vexChanged) {
 async function main() {
   const products = productPurls();
   if (!products.length) fail('product-purls must contain at least one non-empty PURL');
+  candidateBranch = await reuseExistingCandidateBranch();
 
   const alerts = await allDismissedAlerts();
   const normalized = alerts.map(normalizeAlert);
