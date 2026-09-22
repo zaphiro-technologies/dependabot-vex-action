@@ -289,11 +289,13 @@ function dependencyPurl(record) {
   return `pkg:${types[ecosystem] || ecosystem}/${name}${version}`;
 }
 
-function mapVexStatus() {
-  // A Dependabot dismissal is not sufficient evidence for a not_affected VEX
-  // assertion. Keep the generated candidate conservative until a reviewer
-  // establishes the product-specific status and justification.
-  return { status: 'under_investigation' };
+function mapVexStatus(record) {
+  const mapping = {
+    not_used: { status: 'not_affected', justification: 'vulnerable_code_not_present' },
+    inaccurate: { status: 'not_affected', justification: 'vulnerable_code_not_in_execute_path' },
+    tolerable_risk: { status: 'not_affected', justification: 'inline_mitigations_already_exist' },
+  };
+  return mapping[record.dismissed_reason] || { status: 'under_investigation' };
 }
 
 async function annotateNoBandwidth(alert) {
@@ -325,7 +327,7 @@ function mergeLedger(existing, current) {
 }
 
 function vexCandidate(record, products) {
-  const status = mapVexStatus();
+  const status = mapVexStatus(record);
   return {
     vulnerability: {
       name: record.vulnerability.name,
@@ -382,8 +384,10 @@ function retargetStatement(statement, eligible, products) {
   if (!notes.startsWith('dependabot-alert:')) return statement;
   const record = eligible.find(item => notes.startsWith(marker(item)));
   if (!record) return statement;
+  const status = statement.status === 'under_investigation' ? mapVexStatus(record) : {};
   return {
     ...statement,
+    ...status,
     products: products.map(product => ({
       '@id': product,
       subcomponents: [{ '@id': dependencyPurl(record) }],

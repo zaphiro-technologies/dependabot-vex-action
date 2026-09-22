@@ -162,7 +162,7 @@ function outputValue(text, name) {
   return lines.slice(start + 1, end === -1 ? lines.length : end).join('\n');
 }
 
-test('keeps dismissal-derived candidates under investigation and links the original alerts', async () => {
+test('maps dismissal reasons to the original VEX policy and links the alerts', async () => {
   const result = await runAction([
     alert(1, 'not_used', 'CVE-2022-32149'),
     alert(2, 'inaccurate', 'CVE-2021-38561'),
@@ -174,9 +174,9 @@ test('keeps dismissal-derived candidates under investigation and links the origi
   assert.deepEqual(
     result.vex.statements.map(statement => [statement.status, statement.justification]),
     [
-      ['under_investigation', undefined],
-      ['under_investigation', undefined],
-      ['under_investigation', undefined],
+      ['not_affected', 'vulnerable_code_not_present'],
+      ['not_affected', 'vulnerable_code_not_in_execute_path'],
+      ['not_affected', 'inline_mitigations_already_exist'],
     ],
   );
   assert.match(outputValue(result.output, 'pull-request-title'), /Add VEX statements for/);
@@ -287,6 +287,27 @@ test('updates retained statements and reports a scope-only change', async () => 
   assert.equal(result.vex.statements[0].products[0]['@id'], 'pkg:oci/test?repository_url=ghcr.io%2Fzaphiro-technologies%2Ftest');
 });
 
+test('updates an existing generated under-investigation statement to the mapped status', async () => {
+  const current = alert(13, 'not_used', 'CVE-2022-32149');
+  const result = await runAction([current], {
+    files: {
+      '.vex/dependabot.openvex.json': {
+        '@context': 'https://openvex.dev/ns/v0.2.0',
+        version: 1,
+        statements: [{
+          status_notes: `dependabot-alert:${current.html_url}`,
+          products: [{ '@id': 'pkg:oci/test', subcomponents: [] }],
+          status: 'under_investigation',
+        }],
+      },
+    },
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.vex.statements[0].status, 'not_affected');
+  assert.equal(result.vex.statements[0].justification, 'vulnerable_code_not_present');
+});
+
 test('handles an empty alert list without creating a VEX document', async () => {
   const result = await runAction([], { githubOutput: false });
 
@@ -319,7 +340,8 @@ test('reports a ledger-only change when an existing VEX statement is unchanged',
             '@id': product,
             subcomponents: [{ '@id': 'pkg:golang/golang.org/x/text@v0.3.2' }],
           }],
-          status: 'under_investigation',
+          status: 'not_affected',
+          justification: 'vulnerable_code_not_present',
         }],
       },
     },
