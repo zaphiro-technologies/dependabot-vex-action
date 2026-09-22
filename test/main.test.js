@@ -260,11 +260,28 @@ test('paginates alerts and derives product PURLs from supported project files', 
     result.requests.filter(request => request.method === 'GET' && request.url.includes('/dependabot/alerts')).length,
     2,
   );
-  assert.equal(result.vex.statements[0].products.length, 4);
+  assert.equal(result.vex.statements[0].products.length, 5);
   assert.equal(
     result.vex.statements[0].products[0].subcomponents[0]['@id'],
     'pkg:golang/golang.org/x/text@v0.3.2',
   );
+  assert.equal(
+    result.vex.statements[0].products.at(-1)['@id'],
+    'pkg:golang/golang.org/x/text@v0.3.2',
+  );
+});
+
+test('promotes an npm dependency PURL to a direct VEX product', async () => {
+  const current = alert(14, 'not_used', 'CVE-2026-84375', 'js-yaml');
+  current.dependency.package.ecosystem = 'npm';
+  current.dependency.version = '4.3.1';
+  current.security_vulnerability.package.ecosystem = 'npm';
+  const result = await runAction([current]);
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(result.vex.statements[0].products.at(-1), {
+    '@id': 'pkg:npm/js-yaml@4.3.1',
+  });
 });
 
 test('updates retained statements and reports a scope-only change', async () => {
@@ -339,7 +356,7 @@ test('reports a ledger-only change when an existing VEX statement is unchanged',
           products: [{
             '@id': product,
             subcomponents: [{ '@id': 'pkg:golang/golang.org/x/text@v0.3.2' }],
-          }],
+          }, { '@id': 'pkg:golang/golang.org/x/text@v0.3.2' }],
           status: 'not_affected',
           justification: 'vulnerable_code_not_present',
         }],

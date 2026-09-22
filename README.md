@@ -8,7 +8,10 @@ emits safe outputs for a labelled candidate pull request.
 The action maps Dependabot dismissal reasons to OpenVEX statuses and preserves
 the original reason and comment as review context. The mappings are product
 policy defaults and should be changed if the product context does not support
-the assertion.
+the assertion. Each statement keeps the configured product scopes with the
+dependency as a subcomponent and also lists the exact dependency PURL as a
+direct product, so filesystem dependency scans and image scans can both match
+the statement.
 
 Dismissal reasons are handled as follows:
 

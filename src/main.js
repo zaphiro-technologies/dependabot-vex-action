@@ -333,10 +333,7 @@ function vexCandidate(record, products) {
       name: record.vulnerability.name,
       ...(record.vulnerability.aliases.length ? { aliases: record.vulnerability.aliases } : {}),
     },
-    products: products.map(product => ({
-      '@id': product,
-      subcomponents: [{ '@id': dependencyPurl(record) }],
-    })),
+    products: vexProducts(record, products),
     status_notes: [
       marker(record),
       `package=${record.package.name || ''}`,
@@ -349,6 +346,19 @@ function vexCandidate(record, products) {
     ].join('\n'),
     ...status,
   };
+}
+
+function vexProducts(record, products) {
+  const dependency = dependencyPurl(record);
+  return [
+    ...products
+      .filter(product => product !== dependency)
+      .map(product => ({
+        '@id': product,
+        subcomponents: [{ '@id': dependency }],
+      })),
+    { '@id': dependency },
+  ];
 }
 
 async function annotateSkippedAlerts(alerts) {
@@ -388,10 +398,7 @@ function retargetStatement(statement, eligible, products) {
   return {
     ...statement,
     ...status,
-    products: products.map(product => ({
-      '@id': product,
-      subcomponents: [{ '@id': dependencyPurl(record) }],
-    })),
+    products: vexProducts(record, products),
   };
 }
 
@@ -415,8 +422,11 @@ function buildVexDocument(existingVex, records, products) {
   const newRecords = eligible.filter(record => !existingMarkers.has(marker(record)));
   const newStatements = newRecords.map(record => vexCandidate(record, products));
   const statements = [...retained, ...newStatements];
-  const existingProducts = [...new Set(existingStatements.flatMap(statement =>
-    (statement.products || []).map(product => product['@id']).filter(Boolean)))];
+  const existingProducts = [...new Set(
+    existingStatements.flatMap(statement => (statement.products || [])
+      .map(product => product['@id'])
+      .filter(product => products.includes(product))),
+  )];
   const productsChanged = eligible.length > 0
     && JSON.stringify(products) !== JSON.stringify(existingProducts);
   const changed = JSON.stringify(statements) !== JSON.stringify(existingStatements)
