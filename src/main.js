@@ -268,12 +268,16 @@ function marker(record) {
   return `dependabot-alert:${record.url}`;
 }
 
+function encodePurlValue(value) {
+  return encodeURIComponent(String(value)).replaceAll(/[!'()*]/g, character =>
+    `%${character.codePointAt(0).toString(16).toUpperCase()}`);
+}
+
 function dependencyPurl(record) {
   const ecosystem = record.package?.ecosystem || '';
   const name = String(record.package?.name || '')
     .split('/')
-    .map(part => encodeURIComponent(part).replaceAll(/[!'()*]/g, character =>
-      `%${character.codePointAt(0).toString(16).toUpperCase()}`))
+    .map(encodePurlValue)
     .join('/');
   const types = {
     npm: 'npm', go: 'golang', gomod: 'golang', pip: 'pypi', python: 'pypi',
@@ -281,10 +285,7 @@ function dependencyPurl(record) {
     composer: 'composer', nuget: 'nuget', pub: 'pub', hex: 'hex', mix: 'hex',
     docker: 'docker',
   };
-  const version = record.package?.version
-    ? `@${encodeURIComponent(String(record.package.version)).replaceAll(/[!'()*]/g, character =>
-      `%${character.codePointAt(0).toString(16).toUpperCase()}`)}`
-    : '';
+  const version = record.package?.version ? `@${encodePurlValue(record.package.version)}` : '';
   return `pkg:${types[ecosystem] || ecosystem}/${name}${version}`;
 }
 
@@ -432,9 +433,14 @@ function buildVexDocument(existingVex, records, products) {
 
 function pullRequestDetails(newRecords, skipped, ledgerChanged, vexChanged) {
   const vulnerabilityCodes = [...new Set(newRecords.map(record => record.vulnerability.name))];
-  const vulnerabilityList = newRecords.length
-    ? newRecords.map(record => `- ${record.vulnerability.name} (${record.package.name}) — ${record.url}`).join('\n')
-    : vexChanged ? '- Existing VEX product scope updated' : '- Dependabot dismissal ledger initialized or updated';
+  let vulnerabilityList = '- Dependabot dismissal ledger initialized or updated';
+  if (newRecords.length) {
+    vulnerabilityList = newRecords
+      .map(record => `- ${record.vulnerability.name} (${record.package.name}) — ${record.url}`)
+      .join('\n');
+  } else if (vexChanged) {
+    vulnerabilityList = '- Existing VEX product scope updated';
+  }
   let title = vexChanged ? 'Update VEX product scope' : 'Update Dependabot dismissal ledger';
   if (newRecords.length === 1) {
     const record = newRecords[0];
