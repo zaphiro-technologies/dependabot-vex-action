@@ -19,11 +19,11 @@ Dismissal reasons are handled as follows:
   stating that this is not a security assessment
 
 The action emits safe `pull-request-title` and `pull-request-body` outputs. The
-calling workflow uses those outputs with `peter-evans/create-pull-request`.
-When `candidate-branch` is omitted, the action reuses an existing open
-Dependabot VEX candidate branch, including legacy run-specific branches, and
-otherwise uses `automation/dependabot-vex`. This keeps repeated workflow runs
-on the same pull request instead of opening duplicates.
+calling workflow uses those outputs with `peter-evans/create-pull-request`. When
+`candidate-branch` is omitted, the action reuses an existing open Dependabot VEX
+candidate branch, including legacy run-specific branches, and otherwise uses
+`automation/dependabot-vex`. This keeps repeated workflow runs on the same pull
+request instead of opening duplicates.
 
 ## Usage
 
