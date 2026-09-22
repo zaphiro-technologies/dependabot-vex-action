@@ -78,7 +78,10 @@ steps:
 
 When `product-purls` is empty, the action includes the GHCR OCI PURL and
 automatically derives PURLs from `go.mod`, `pyproject.toml`, and `package.json`
-when those files are present.
+when those files are present. Dependency versions are resolved from the
+checked-out `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`,
+`pnpm-lock.yaml`, `go.mod`/`go.sum`, or `poetry.lock` when GitHub's alert payload
+does not include the installed version.
 
 ## Development
 

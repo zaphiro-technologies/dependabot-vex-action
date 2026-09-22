@@ -274,14 +274,68 @@ test('paginates alerts and derives product PURLs from supported project files', 
 test('promotes an npm dependency PURL to a direct VEX product', async () => {
   const current = alert(14, 'not_used', 'CVE-2026-84375', 'js-yaml');
   current.dependency.package.ecosystem = 'npm';
-  current.dependency.version = '4.3.1';
+  delete current.dependency.version;
+  current.dependency.manifest_path = 'package-lock.json';
   current.security_vulnerability.package.ecosystem = 'npm';
-  const result = await runAction([current]);
+  const result = await runAction([current], {
+    files: {
+      'package-lock.json': {
+        lockfileVersion: 3,
+        packages: {
+          '': { name: 'documentation-test', version: '1.0.0' },
+          'node_modules/js-yaml': { version: '4.3.1' },
+        },
+      },
+    },
+  });
 
   assert.equal(result.code, 0, result.stderr);
   assert.deepEqual(result.vex.statements[0].products.at(-1), {
     '@id': 'pkg:npm/js-yaml@4.3.1',
   });
+});
+
+test('resolves a Go dependency version from go.mod when the alert omits it', async () => {
+  const current = alert(15, 'not_used', 'CVE-2026-00015');
+  delete current.dependency.version;
+  current.dependency.manifest_path = 'go.mod';
+  const result = await runAction([current], {
+    files: { 'go.mod': 'module example.org/app\n\nrequire golang.org/x/text v0.3.2\n' },
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.vex.statements[0].products.at(-1)['@id'], 'pkg:golang/golang.org/x/text@v0.3.2');
+});
+
+test('falls back to go.sum when go.mod does not contain the dependency', async () => {
+  const current = alert(17, 'not_used', 'CVE-2026-00017');
+  delete current.dependency.version;
+  current.dependency.manifest_path = 'go.mod';
+  const result = await runAction([current], {
+    files: {
+      'go.mod': 'module example.org/app\n',
+      'go.sum': 'golang.org/x/text v0.3.2 h1:checksum\ngolang.org/x/text v0.3.2/go.mod h1:checksum\n',
+    },
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.vex.statements[0].products.at(-1)['@id'], 'pkg:golang/golang.org/x/text@v0.3.2');
+});
+
+test('resolves a Poetry dependency version from poetry.lock when the alert omits it', async () => {
+  const current = alert(16, 'not_used', 'CVE-2026-00016', 'PyYAML');
+  current.dependency.package.ecosystem = 'pip';
+  delete current.dependency.version;
+  current.dependency.manifest_path = 'pyproject.toml';
+  current.security_vulnerability.package.ecosystem = 'pip';
+  const result = await runAction([current], {
+    files: {
+      'poetry.lock': '[metadata]\nlock-version = "2.0"\n\n[[package]]\nname = "pyyaml"\nversion = "6.0.2"\n',
+    },
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.vex.statements[0].products.at(-1)['@id'], 'pkg:pypi/PyYAML@6.0.2');
 });
 
 test('updates retained statements and reports a scope-only change', async () => {
