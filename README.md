@@ -38,9 +38,9 @@ Pass `candidate-branch` when a caller needs a different branch identity.
 The calling workflow must check out the repository before invoking the action.
 The workflow can use read-only `GITHUB_TOKEN` permissions as shown below; the
 token passed as `github-token` must be a GitHub App installation token with
-contents, issues, pull requests, and vulnerability-alerts write permissions.
-The standard `GITHUB_TOKEN` cannot update Dependabot alerts when dismissed
-alerts use `no_bandwidth`.
+contents, issues, pull requests, and vulnerability-alerts write permissions. The
+standard `GITHUB_TOKEN` cannot update Dependabot alerts when dismissed alerts
+use `no_bandwidth`.
 
 ```yaml
 permissions:
@@ -81,7 +81,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        vulnerability-id: ${{ fromJSON(needs.discover.outputs.vulnerability-ids) }}
+        vulnerability-id:
+          ${{ fromJSON(needs.discover.outputs.vulnerability-ids) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
