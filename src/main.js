@@ -39,7 +39,8 @@ function safeBranchIdentity(identity) {
   return String(identity)
     .replaceAll(/[^A-Za-z0-9._-]+/g, '-')
     .replaceAll(/-+/g, '-')
-    .replaceAll(/^[-.]+|[-.]+$/g, '')
+    .replaceAll(/^[-.]+/g, '')
+    .replaceAll(/[-.]+$/g, '')
     .slice(0, 80) || 'scope';
 }
 
@@ -274,6 +275,31 @@ function addNpmLockVersions(lock, packageName, versions) {
   visit(lock.dependencies);
 }
 
+function parseTextLockHeader(line, selectorPattern, escapedName) {
+  const trimmed = line.trim();
+  const headerMatch = line.match(/^ {0,2}(.+):\s*$/);
+  const indentation = line.length - line.trimStart().length;
+  const isHeader = trimmed && headerMatch && (indentation === 0 || selectorPattern.test(trimmed));
+  if (!isHeader) return null;
+
+  const selected = selectorPattern.test(trimmed);
+  const header = headerMatch[1].replace(/^['"]|['"]$/g, '');
+  const match = header.match(new RegExp(String.raw`${escapedName}@([^,\s"]+)`));
+  const version = match && /^v?\d+\.\d+\.\d+(?:[-+].*)?$/.test(match[1])
+    ? match[1]
+    : null;
+  return { selected, version };
+}
+
+function parseTextLockVersion(trimmed) {
+  const separator = trimmed.slice('version'.length, 'version'.length + 1);
+  if (!trimmed.startsWith('version') || (separator !== ':' && !/\s/.test(separator))) return null;
+  let value = trimmed.slice('version'.length).trimStart();
+  if (value.startsWith(':')) value = value.slice(1).trimStart();
+  if (value.startsWith('"') || value.startsWith("'")) value = value.slice(1);
+  return value.split(/["'\s]/, 1)[0] || null;
+}
+
 function addTextLockVersions(text, packageName, versions) {
   const escapedName = packageName.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
   const selectorPattern = new RegExp(String.raw`(^|[\s,"'])${escapedName}@`);
@@ -287,25 +313,14 @@ function addTextLockVersions(text, packageName, versions) {
   };
 
   for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    const headerMatch = line.match(/^ {0,2}(.+):\s*$/);
-    const indentation = line.length - line.trimStart().length;
-    if (trimmed && headerMatch && (indentation === 0 || selectorPattern.test(trimmed))) {
+    const header = parseTextLockHeader(line, selectorPattern, escapedName);
+    if (header) {
       flush();
-      selected = selectorPattern.test(trimmed);
-      const header = headerMatch[1].replace(/^['"]|['"]$/g, '');
-      const match = header.match(new RegExp(String.raw`${escapedName}@([^,\s"]+)`));
-      if (match && /^v?\d+\.\d+\.\d+(?:[-+].*)?$/.test(match[1])) headerVersion = match[1];
+      selected = header.selected;
+      headerVersion = header.version;
       continue;
     }
-    if (!selected) continue;
-    const separator = trimmed.slice('version'.length, 'version'.length + 1);
-    if (!trimmed.startsWith('version') || (separator !== ':' && !/\s/.test(separator))) continue;
-    let value = trimmed.slice('version'.length).trimStart();
-    if (value.startsWith(':')) value = value.slice(1).trimStart();
-    if (value.startsWith('"') || value.startsWith("'")) value = value.slice(1);
-    const version = value.split(/["'\s]/, 1)[0];
-    if (version) headerVersion = version;
+    if (selected) headerVersion = parseTextLockVersion(line.trim()) || headerVersion;
   }
   flush();
 }
