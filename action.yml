@@ -41,7 +41,7 @@ inputs:
     required: false
     default: main
   candidate-branch:
-    description: Candidate branch name; defaults to an existing open candidate branch or automation/dependabot-vex
+    description: Candidate branch name; defaults to automation/dependabot-vex-${GITHUB_RUN_ID}
     required: false
     default: ""
 outputs:

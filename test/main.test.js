@@ -61,7 +61,6 @@ async function runAction(alerts, {
   productPurls = 'pkg:oci/test?repository_url=ghcr.io%2Fzaphiro-technologies%2Ftest',
   githubOutput = true,
   nextAlerts,
-  openPullRequests = [],
   serverError,
 } = {}) {
   const workspace = await mkdtemp(path.join(tmpdir(), 'dependabot-vex-action-'));
@@ -95,11 +94,6 @@ async function runAction(alerts, {
         );
       }
       response.end(JSON.stringify(request.url.includes('page=2') ? nextAlerts : alerts));
-      return;
-    }
-    if (request.method === 'GET' && request.url?.startsWith('/repos/zaphiro-technologies/test/pulls')) {
-      response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify(openPullRequests));
       return;
     }
     if (request.method === 'PATCH' && request.url?.includes('/dependabot/alerts/')) {
@@ -205,29 +199,11 @@ test('uses github-token when reading Dependabot alerts', async () => {
   assert.equal(getAlerts?.authorization, 'Bearer app-token');
 });
 
-test('reuses an existing candidate branch instead of creating a new run-specific branch', async () => {
-  const result = await runAction([alert(12, 'not_used', 'CVE-2022-32149')], {
-    openPullRequests: [{
-      number: 4,
-      head: {
-        ref: 'automation/dependabot-vex-35704681764',
-        repo: { full_name: 'zaphiro-technologies/test' },
-      },
-    }],
-  });
-
-  assert.equal(result.code, 0, result.stderr);
-  assert.equal(
-    outputValue(result.output, 'candidate-branch'),
-    'automation/dependabot-vex-35704681764',
-  );
-});
-
-test('uses a stable candidate branch when no candidate pull request is open', async () => {
+test('uses the workflow run as the default candidate branch identity', async () => {
   const result = await runAction([alert(13, 'not_used', 'CVE-2022-32149')]);
 
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(outputValue(result.output, 'candidate-branch'), 'automation/dependabot-vex');
+  assert.equal(outputValue(result.output, 'candidate-branch'), 'automation/dependabot-vex-12345');
 });
 
 test('skips no_bandwidth and annotates the original alert', async () => {
