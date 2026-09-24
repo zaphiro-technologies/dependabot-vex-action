@@ -1,0 +1,26 @@
+name: Test New Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to create without the leading v
+        required: false
+        type: string
+      dependency-scan:
+        description: Generate source dependency SBOM and vulnerability evidence
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  release:
+    uses: zaphiro-technologies/github-workflows/.github/workflows/new-release.yaml@improve-release-evidences
+    with:
+      tag: ${{ inputs.tag }}
+      dependency-scan: ${{ inputs.dependency-scan }}
+    secrets: inherit

@@ -1,0 +1,71 @@
+# Copyright 2026 Zaphiro Technologies
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Dependabot VEX candidates
+description: Generate reviewed OpenVEX candidates from dismissed Dependabot alerts
+author: Zaphiro Technologies
+
+inputs:
+  github-token:
+    description: Token used to read Dependabot alerts and annotate no_bandwidth dismissals
+    required: true
+  product-purls:
+    description: Newline-separated PURLs for products covered by the VEX statements
+    required: false
+    default: ""
+  image-name:
+    description: GHCR image name used when product-purls is omitted
+    required: false
+    default: ""
+  vex-path:
+    description: Path of the repository-owned OpenVEX document
+    required: false
+    default: .vex/dependabot.openvex.json
+  dismissal-ledger-path:
+    description: Path of the historical Dependabot dismissal ledger
+    required: false
+    default: .vex/dependabot-dismissals.json
+  base-branch:
+    description: Branch used as the base for the candidate changes and pull request
+    required: false
+    default: main
+  vulnerability-id:
+    description: Vulnerability identifier to generate in this candidate; omit during discovery
+    required: false
+    default: ""
+  candidate-branch:
+    description: Candidate branch name; defaults to an open matching vulnerability branch or automation/dependabot-vex-vulnerability-id-GITHUB_RUN_ID
+    required: false
+    default: ""
+outputs:
+  changed:
+    description: Whether the VEX or dismissal ledger changed
+  candidate-branch:
+    description: Candidate branch used by the action
+  vulnerability-codes:
+    description: Vulnerability identifiers included in the candidate PR
+  vulnerability-ids:
+    description: JSON array of vulnerability identifiers requiring candidate pull requests
+  pull-request-title:
+    description: Safe title output for create-pull-request
+  pull-request-body:
+    description: Safe body output for create-pull-request
+  vex-changed:
+    description: Whether the VEX document changed
+  skipped-alerts:
+    description: Dependabot alert numbers skipped because their reason was no_bandwidth
+
+runs:
+  using: node24
+  main: src/main.js
