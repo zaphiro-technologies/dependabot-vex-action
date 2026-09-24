@@ -26,10 +26,12 @@ Dismissal reasons are handled as follows:
 The action emits safe `pull-request-title` and `pull-request-body` outputs. The
 calling workflow uses those outputs with `peter-evans/create-pull-request`. When
 `candidate-branch` is omitted, the action uses
-`automation/dependabot-vex-${GITHUB_RUN_ID}`. A rerun of the same GitHub Actions
-run therefore updates the same branch and pull request, while a separate run
-gets its own branch. Pass `candidate-branch` when a caller needs a different
-stable branch identity.
+the historical `automation/dependabot-vex` branch for the default VEX path.
+For other VEX paths it uses `automation/dependabot-vex-<stable-id>`, where the
+ID is derived from the repository, base branch, and VEX path. Separate
+workflow runs targeting the same VEX therefore update the same branch and open
+pull request, while different VEX paths get different branches. Pass
+`candidate-branch` when a caller needs a different stable branch identity.
 
 ## Usage
 

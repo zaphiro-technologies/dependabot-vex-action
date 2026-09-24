@@ -15,6 +15,7 @@
  */
 
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
@@ -28,11 +29,17 @@ if (!token) fail('github-token input is required');
 
 const [owner, repo] = repository.split('/');
 const baseBranch = input('base-branch', 'main');
-const candidateBranch = input('candidate-branch') ||
-  `automation/dependabot-vex-${process.env.GITHUB_RUN_ID || 'local'}`;
 const vexPath = input('vex-path', '.vex/dependabot.openvex.json');
 const ledgerPath = input('dismissal-ledger-path', '.vex/dependabot-dismissals.json');
+const candidateBranch = input('candidate-branch') || defaultCandidateBranch();
 const githubOutput = process.env.GITHUB_OUTPUT;
+
+function defaultCandidateBranch() {
+  if (vexPath === '.vex/dependabot.openvex.json') return 'automation/dependabot-vex';
+  const identity = `${repository}\n${baseBranch}\n${vexPath}`;
+  const digest = createHash('sha256').update(identity).digest('hex').slice(0, 12);
+  return `automation/dependabot-vex-${digest}`;
+}
 
 function input(name, fallback = '') {
   const upper = name.toUpperCase();

@@ -61,6 +61,8 @@ async function runAction(alerts, {
   productPurls = 'pkg:oci/test?repository_url=ghcr.io%2Fzaphiro-technologies%2Ftest',
   githubOutput = true,
   nextAlerts,
+  runId = '12345',
+  vexPath = '.vex/dependabot.openvex.json',
   serverError,
 } = {}) {
   const workspace = await mkdtemp(path.join(tmpdir(), 'dependabot-vex-action-'));
@@ -117,14 +119,14 @@ async function runAction(alerts, {
         GITHUB_OUTPUT: output,
         GITHUB_REPOSITORY: 'zaphiro-technologies/test',
         GITHUB_REPOSITORY_OWNER: 'zaphiro-technologies',
-        GITHUB_RUN_ID: '12345',
+        GITHUB_RUN_ID: runId,
         GITHUB_SERVER_URL: 'https://github.com',
         GITHUB_WORKSPACE: workspace,
         INPUT_BASE_BRANCH: 'main',
         INPUT_DISMISSAL_LEDGER_PATH: '.vex/dependabot-dismissals.json',
         'INPUT_GITHUB-TOKEN': token || '',
         INPUT_PRODUCT_PURLS: productPurls,
-        INPUT_VEX_PATH: '.vex/dependabot.openvex.json',
+        INPUT_VEX_PATH: vexPath,
         ...(imageName === undefined ? {} : { INPUT_IMAGE_NAME: imageName }),
         ...(githubOutput ? {} : { GITHUB_OUTPUT: '' }),
       },
@@ -199,11 +201,32 @@ test('uses github-token when reading Dependabot alerts', async () => {
   assert.equal(getAlerts?.authorization, 'Bearer app-token');
 });
 
-test('uses the workflow run as the default candidate branch identity', async () => {
-  const result = await runAction([alert(13, 'not_used', 'CVE-2022-32149')]);
+test('uses a stable VEX identity as the default candidate branch', async () => {
+  const firstRun = await runAction([alert(13, 'not_used', 'CVE-2022-32149')], {
+    runId: '12345',
+  });
+  const laterRun = await runAction([alert(13, 'not_used', 'CVE-2022-32149')], {
+    runId: '67890',
+  });
+
+  assert.equal(firstRun.code, 0, firstRun.stderr);
+  assert.equal(laterRun.code, 0, laterRun.stderr);
+  const firstBranch = outputValue(firstRun.output, 'candidate-branch');
+  const laterBranch = outputValue(laterRun.output, 'candidate-branch');
+  assert.equal(firstBranch, 'automation/dependabot-vex');
+  assert.equal(firstBranch, laterBranch);
+});
+
+test('uses a different stable branch for a different VEX path', async () => {
+  const result = await runAction([alert(14, 'not_used', 'CVE-2022-32149')], {
+    vexPath: '.vex/other.openvex.json',
+  });
 
   assert.equal(result.code, 0, result.stderr);
-  assert.equal(outputValue(result.output, 'candidate-branch'), 'automation/dependabot-vex-12345');
+  assert.match(
+    outputValue(result.output, 'candidate-branch'),
+    /^automation\/dependabot-vex-[0-9a-f]{12}$/,
+  );
 });
 
 test('skips no_bandwidth and annotates the original alert', async () => {
