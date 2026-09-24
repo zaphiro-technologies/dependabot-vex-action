@@ -40,8 +40,12 @@ inputs:
     description: Branch used as the base for the candidate changes and pull request
     required: false
     default: main
+  vulnerability-id:
+    description: Vulnerability identifier to generate in this candidate; omit during discovery
+    required: false
+    default: ""
   candidate-branch:
-    description: Candidate branch name; defaults to a stable branch derived from the repository, base branch, and VEX path
+    description: Candidate branch name; defaults to automation/dependabot-vex-vulnerability-id-GITHUB_RUN_ID
     required: false
     default: ""
 outputs:
@@ -51,6 +55,8 @@ outputs:
     description: Candidate branch used by the action
   vulnerability-codes:
     description: Vulnerability identifiers included in the candidate PR
+  vulnerability-ids:
+    description: JSON array of vulnerability identifiers requiring candidate pull requests
   pull-request-title:
     description: Safe title output for create-pull-request
   pull-request-body:

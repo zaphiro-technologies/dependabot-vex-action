@@ -23,60 +23,100 @@ Dismissal reasons are handled as follows:
 - `no_bandwidth` → no VEX statement; the original alert receives a comment
   stating that this is not a security assessment
 
-The action emits safe `pull-request-title` and `pull-request-body` outputs. The
-calling workflow uses those outputs with `peter-evans/create-pull-request`. When
-`candidate-branch` is omitted, the action uses the historical
-`automation/dependabot-vex` branch for the default VEX path. For other VEX paths
-it uses `automation/dependabot-vex-<stable-id>`, where the ID is derived from
-the repository, base branch, and VEX path. Separate workflow runs targeting the
-same VEX therefore update the same branch and open pull request, while different
-VEX paths get different branches. Pass `candidate-branch` when a caller needs a
-different stable branch identity.
+The action emits safe `pull-request-title`, `pull-request-body`, and
+`vulnerability-ids` outputs. The reusable calling workflow first discovers the
+new vulnerability identifiers, then invokes the action once per identifier and
+uses those outputs with `peter-evans/create-pull-request`. When
+`candidate-branch` is omitted, a candidate uses
+`automation/dependabot-vex-<vulnerability-id>-<GITHUB_RUN_ID>`. A rerun of the
+same GitHub Actions run therefore targets the same vulnerability branch, while
+different vulnerabilities in one run get separate branches and pull requests.
+Pass `candidate-branch` when a caller needs a different branch identity.
 
 ## Usage
 
 The calling workflow must check out the repository before invoking the action.
-It needs `contents: write`, `issues: write`, and `pull-requests: write`
-permissions. The token passed as `github-token` must be a GitHub App
-installation token with Dependabot alerts write permission when dismissed alerts
-can use `no_bandwidth`; the standard `GITHUB_TOKEN` cannot update those alerts.
+The workflow can use read-only `GITHUB_TOKEN` permissions as shown below; the
+token passed as `github-token` must be a GitHub App installation token with
+contents, issues, pull requests, and vulnerability-alerts write permissions.
+The standard `GITHUB_TOKEN` cannot update Dependabot alerts when dismissed
+alerts use `no_bandwidth`.
 
 ```yaml
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
+  vulnerability-alerts: read
 
-steps:
-  - uses: actions/checkout@v7.0.1
-    with:
-      fetch-depth: 0
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      vulnerability-ids: ${{ steps.vex.outputs.vulnerability-ids }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
 
-  - id: app-token
-    uses: actions/create-github-app-token@v3
-    with:
-      app-id: ${{ secrets.APP_ID }}
-      private-key: ${{ secrets.APP_SECRET }}
-      permission-contents: write
-      permission-issues: write
-      permission-pull-requests: write
-      permission-vulnerability-alerts: write
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_SECRET }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+          permission-vulnerability-alerts: write
 
-  - id: vex
-    uses: zaphiro-technologies/dependabot-vex-action@v1
-    with:
-      github-token: ${{ steps.app-token.outputs.token }}
-      base-branch: main
+      - id: vex
+        uses: zaphiro-technologies/dependabot-vex-action@v1
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          base-branch: main
 
-  - uses: peter-evans/create-pull-request@v7
-    if: ${{ steps.vex.outputs.changed == 'true' }}
-    with:
-      token: ${{ github.token }}
-      base: main
-      branch: ${{ steps.vex.outputs.candidate-branch }}
-      title: ${{ steps.vex.outputs.pull-request-title }}
-      body: ${{ steps.vex.outputs.pull-request-body }}
-      labels: security
+  create-vex-pr:
+    needs: discover
+    if: ${{ needs.discover.outputs.vulnerability-ids != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        vulnerability-id: ${{ fromJSON(needs.discover.outputs.vulnerability-ids) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_SECRET }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+          permission-vulnerability-alerts: write
+
+      - id: vex
+        uses: zaphiro-technologies/dependabot-vex-action@v1
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          base-branch: main
+          vulnerability-id: ${{ matrix.vulnerability-id }}
+
+      - uses: peter-evans/create-pull-request@v7
+        if: ${{ steps.vex.outputs.changed == 'true' }}
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          base: main
+          branch: ${{ steps.vex.outputs.candidate-branch }}
+          delete-branch: true
+          commit-message: "security: update Dependabot VEX statements"
+          title: ${{ steps.vex.outputs.pull-request-title }}
+          body: ${{ steps.vex.outputs.pull-request-body }}
+          labels: security
 ```
 
 When `product-purls` is empty, the action includes the GHCR OCI PURL and

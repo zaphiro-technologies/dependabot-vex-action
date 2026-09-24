@@ -15,7 +15,6 @@
  */
 
 import fs from 'node:fs';
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
@@ -31,14 +30,18 @@ const [owner, repo] = repository.split('/');
 const baseBranch = input('base-branch', 'main');
 const vexPath = input('vex-path', '.vex/dependabot.openvex.json');
 const ledgerPath = input('dismissal-ledger-path', '.vex/dependabot-dismissals.json');
+const vulnerabilityId = input('vulnerability-id');
 const candidateBranch = input('candidate-branch') || defaultCandidateBranch();
 const githubOutput = process.env.GITHUB_OUTPUT;
 
 function defaultCandidateBranch() {
-  if (vexPath === '.vex/dependabot.openvex.json') return 'automation/dependabot-vex';
-  const identity = `${repository}\n${baseBranch}\n${vexPath}`;
-  const digest = createHash('sha256').update(identity).digest('hex').slice(0, 12);
-  return `automation/dependabot-vex-${digest}`;
+  const identity = vulnerabilityId || 'scope';
+  const safeIdentity = String(identity)
+    .replaceAll(/[^A-Za-z0-9._-]+/g, '-')
+    .replaceAll(/-+/g, '-')
+    .replaceAll(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 80) || 'scope';
+  return `automation/dependabot-vex-${safeIdentity}-${process.env.GITHUB_RUN_ID || 'local'}`;
 }
 
 function input(name, fallback = '') {
@@ -410,6 +413,11 @@ function marker(record) {
   return `dependabot-alert:${record.url}`;
 }
 
+function matchesVulnerability(record) {
+  return !vulnerabilityId || vulnerabilityId === '__vex_scope__' ||
+    record.vulnerability.name === vulnerabilityId;
+}
+
 function encodePurlValue(value) {
   return encodeURIComponent(String(value)).replaceAll(/[!'()*]/g, character =>
     `%${character.codePointAt(0).toString(16).toUpperCase()}`);
@@ -515,7 +523,8 @@ function loadLedger(normalized) {
   // dismissed_comment, but is intentionally not added to the VEX ledger.
   const ledger = mergeLedger(
     existingLedger,
-    normalized.filter(record => record.dismissed_reason !== 'no_bandwidth'),
+    normalized.filter(record =>
+      record.dismissed_reason !== 'no_bandwidth' && matchesVulnerability(record)),
   );
   const ledgerExists = fs.existsSync(absolute(ledgerPath));
   const changed = (ledger.alerts.length > 0 || ledgerExists)
@@ -626,7 +635,8 @@ async function main() {
 
   const alerts = await allDismissedAlerts();
   const normalized = alerts.map(normalizeAlert);
-  const skipped = normalized.filter(record => record.dismissed_reason === 'no_bandwidth');
+  const skipped = normalized.filter(record =>
+    record.dismissed_reason === 'no_bandwidth' && matchesVulnerability(record));
   await annotateSkippedAlerts(alerts);
 
   const { records, changed: ledgerChanged } = loadLedger(normalized);
@@ -647,6 +657,10 @@ async function main() {
   output('pull-request-title', title);
   output('pull-request-body', body);
   output('vulnerability-codes', vulnerabilityCodes.join(', ') || (ledgerChanged ? 'ledger update' : 'scope update'));
+  const candidateVulnerabilityIds = [...new Set(vulnerabilityCodes)];
+  output('vulnerability-ids', JSON.stringify(
+    candidateVulnerabilityIds.length || !changed ? candidateVulnerabilityIds : ['__vex_scope__'],
+  ));
   output('skipped-alerts', skipped.map(record => record.alert).join(', '));
   console.log(`Currently dismissed Dependabot alerts: ${alerts.length}`);
   console.log(`Historical dismissal records: ${records.length}`);

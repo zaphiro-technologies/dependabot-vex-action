@@ -62,6 +62,7 @@ async function runAction(alerts, {
   githubOutput = true,
   nextAlerts,
   runId = '12345',
+  vulnerabilityId,
   vexPath = '.vex/dependabot.openvex.json',
   serverError,
 } = {}) {
@@ -127,6 +128,7 @@ async function runAction(alerts, {
         'INPUT_GITHUB-TOKEN': token || '',
         INPUT_PRODUCT_PURLS: productPurls,
         INPUT_VEX_PATH: vexPath,
+        ...(vulnerabilityId === undefined ? {} : { INPUT_VULNERABILITY_ID: vulnerabilityId }),
         ...(imageName === undefined ? {} : { INPUT_IMAGE_NAME: imageName }),
         ...(githubOutput ? {} : { GITHUB_OUTPUT: '' }),
       },
@@ -178,6 +180,10 @@ test('maps dismissal reasons to the original VEX policy and links the alerts', a
   assert.match(outputValue(result.output, 'pull-request-title'), /Add VEX statements for/);
   assert.match(outputValue(result.output, 'pull-request-body'), /security\/dependabot\/1/);
   assert.match(outputValue(result.output, 'pull-request-body'), /security\/dependabot\/3/);
+  assert.deepEqual(
+    JSON.parse(outputValue(result.output, 'vulnerability-ids')),
+    ['CVE-2022-32149', 'CVE-2021-38561', 'CVE-2020-14040'],
+  );
 });
 
 test('uses the requested singular PR title for one CVE', async () => {
@@ -201,32 +207,49 @@ test('uses github-token when reading Dependabot alerts', async () => {
   assert.equal(getAlerts?.authorization, 'Bearer app-token');
 });
 
-test('uses a stable VEX identity as the default candidate branch', async () => {
-  const firstRun = await runAction([alert(13, 'not_used', 'CVE-2022-32149')], {
+test('uses the vulnerability and workflow run as the default candidate branch', async () => {
+  const result = await runAction([alert(13, 'not_used', 'CVE-2022-32149')], {
     runId: '12345',
+    vulnerabilityId: 'CVE-2022-32149',
   });
-  const laterRun = await runAction([alert(13, 'not_used', 'CVE-2022-32149')], {
-    runId: '67890',
+  const sameRun = await runAction([alert(13, 'not_used', 'CVE-2022-32149')], {
+    runId: '12345',
+    vulnerabilityId: 'CVE-2022-32149',
   });
-
-  assert.equal(firstRun.code, 0, firstRun.stderr);
-  assert.equal(laterRun.code, 0, laterRun.stderr);
-  const firstBranch = outputValue(firstRun.output, 'candidate-branch');
-  const laterBranch = outputValue(laterRun.output, 'candidate-branch');
-  assert.equal(firstBranch, 'automation/dependabot-vex');
-  assert.equal(firstBranch, laterBranch);
-});
-
-test('uses a different stable branch for a different VEX path', async () => {
-  const result = await runAction([alert(14, 'not_used', 'CVE-2022-32149')], {
-    vexPath: '.vex/other.openvex.json',
+  const differentVulnerability = await runAction([alert(14, 'not_used', 'CVE-2021-38561')], {
+    runId: '12345',
+    vulnerabilityId: 'CVE-2021-38561',
   });
 
   assert.equal(result.code, 0, result.stderr);
-  assert.match(
+  assert.equal(sameRun.code, 0, sameRun.stderr);
+  assert.equal(differentVulnerability.code, 0, differentVulnerability.stderr);
+  assert.equal(
     outputValue(result.output, 'candidate-branch'),
-    /^automation\/dependabot-vex-[0-9a-f]{12}$/,
+    'automation/dependabot-vex-CVE-2022-32149-12345',
   );
+  assert.equal(
+    outputValue(result.output, 'candidate-branch'),
+    outputValue(sameRun.output, 'candidate-branch'),
+  );
+  assert.notEqual(
+    outputValue(result.output, 'candidate-branch'),
+    outputValue(differentVulnerability.output, 'candidate-branch'),
+  );
+});
+
+test('filters a candidate to one vulnerability when requested', async () => {
+  const result = await runAction([
+    alert(14, 'not_used', 'CVE-2022-32149'),
+    alert(15, 'inaccurate', 'CVE-2021-38561'),
+  ], {
+    vulnerabilityId: 'CVE-2022-32149',
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.vex.statements.length, 1);
+  assert.equal(result.vex.statements[0].vulnerability.name, 'CVE-2022-32149');
+  assert.deepEqual(JSON.parse(outputValue(result.output, 'vulnerability-ids')), ['CVE-2022-32149']);
 });
 
 test('skips no_bandwidth and annotates the original alert', async () => {
