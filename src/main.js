@@ -275,8 +275,8 @@ function addNpmLockVersions(lock, packageName, versions) {
 }
 
 function addTextLockVersions(text, packageName, versions) {
-  const escapedName = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const selectorPattern = new RegExp(`(^|[\\s,"'])${escapedName}@`);
+  const escapedName = packageName.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+  const selectorPattern = new RegExp(String.raw`(^|[\s,"'])${escapedName}@`);
   let selected = false;
   let headerVersion = null;
 
@@ -294,13 +294,18 @@ function addTextLockVersions(text, packageName, versions) {
       flush();
       selected = selectorPattern.test(trimmed);
       const header = headerMatch[1].replace(/^['"]|['"]$/g, '');
-      const match = header.match(new RegExp(`${escapedName}@([^,\\s"]+)`));
+      const match = header.match(new RegExp(String.raw`${escapedName}@([^,\s"]+)`));
       if (match && /^v?\d+\.\d+\.\d+(?:[-+].*)?$/.test(match[1])) headerVersion = match[1];
       continue;
     }
     if (!selected) continue;
-    const match = trimmed.match(/^version\s*:?[ \t]+["']?([^"'\s]+)["']?/);
-    if (match) headerVersion = match[1];
+    const separator = trimmed.slice('version'.length, 'version'.length + 1);
+    if (!trimmed.startsWith('version') || (separator !== ':' && !/\s/.test(separator))) continue;
+    let value = trimmed.slice('version'.length).trimStart();
+    if (value.startsWith(':')) value = value.slice(1).trimStart();
+    if (value.startsWith('"') || value.startsWith("'")) value = value.slice(1);
+    const version = value.split(/["'\s]/, 1)[0];
+    if (version) headerVersion = version;
   }
   flush();
 }
@@ -346,20 +351,18 @@ function addPoetryLockVersions(text, packageName, versions) {
   flush();
 }
 
-function dependencyVersion(alert, dependency) {
-  if (alert.dependency?.version) return String(alert.dependency.version);
-  const versions = new Set();
-  const files = lockfilePaths(alert);
-  const ecosystem = dependency.ecosystem;
+function isRelevantLockfile(ecosystem, basename) {
+  if (ecosystem === 'go' || ecosystem === 'gomod') return basename === 'go.mod';
+  if (ecosystem === 'pip' || ecosystem === 'python' || ecosystem === 'poetry') {
+    return basename === 'poetry.lock';
+  }
+  return ecosystem === 'npm';
+}
 
+function collectLockfileVersions(files, ecosystem, dependency, versions) {
   for (const file of files) {
     const basename = path.basename(file);
-    if ((ecosystem === 'go' || ecosystem === 'gomod') && basename !== 'go.mod') continue;
-    if (ecosystem === 'pip' || ecosystem === 'python' || ecosystem === 'poetry') {
-      if (basename !== 'poetry.lock') continue;
-    } else if (ecosystem !== 'npm' && ecosystem !== 'go' && ecosystem !== 'gomod') {
-      continue;
-    }
+    if (!isRelevantLockfile(ecosystem, basename)) continue;
     try {
       const text = fs.readFileSync(file, 'utf8');
       if (ecosystem === 'npm') {
@@ -377,16 +380,29 @@ function dependencyVersion(alert, dependency) {
       console.warn(`Warning: unable to resolve ${dependency.name} from ${file}: ${error.message}`);
     }
   }
+}
 
-  if (versions.size === 1) return [...versions][0];
-  if ((ecosystem === 'go' || ecosystem === 'gomod') && versions.size === 0) {
-    for (const file of files.filter(item => path.basename(item) === 'go.sum')) {
-      try {
-        addGoSumVersions(fs.readFileSync(file, 'utf8'), dependency.name, versions);
-      } catch (error) {
-        console.warn(`Warning: unable to resolve ${dependency.name} from ${file}: ${error.message}`);
-      }
+function collectGoSumVersions(files, dependency, versions) {
+  for (const file of files.filter(item => path.basename(item) === 'go.sum')) {
+    try {
+      addGoSumVersions(fs.readFileSync(file, 'utf8'), dependency.name, versions);
+    } catch (error) {
+      console.warn(`Warning: unable to resolve ${dependency.name} from ${file}: ${error.message}`);
     }
+  }
+}
+
+function dependencyVersion(alert, dependency) {
+  if (alert.dependency?.version) return String(alert.dependency.version);
+  const versions = new Set();
+  const files = lockfilePaths(alert);
+  const ecosystem = dependency.ecosystem;
+
+  collectLockfileVersions(files, ecosystem, dependency, versions);
+  if (versions.size === 1) return [...versions][0];
+
+  if ((ecosystem === 'go' || ecosystem === 'gomod') && versions.size === 0) {
+    collectGoSumVersions(files, dependency, versions);
     if (versions.size === 1) return [...versions][0];
   }
   if (versions.size > 1) {
