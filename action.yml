@@ -45,7 +45,7 @@ inputs:
     required: false
     default: ""
   candidate-branch:
-    description: Candidate branch name; defaults to automation/dependabot-vex-vulnerability-id-GITHUB_RUN_ID
+    description: Candidate branch name; defaults to an open matching vulnerability branch or automation/dependabot-vex-vulnerability-id-GITHUB_RUN_ID
     required: false
     default: ""
 outputs:

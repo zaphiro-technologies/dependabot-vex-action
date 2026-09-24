@@ -61,6 +61,7 @@ async function runAction(alerts, {
   productPurls = 'pkg:oci/test?repository_url=ghcr.io%2Fzaphiro-technologies%2Ftest',
   githubOutput = true,
   nextAlerts,
+  openPullRequests = [],
   runId = '12345',
   vulnerabilityId,
   vexPath = '.vex/dependabot.openvex.json',
@@ -97,6 +98,11 @@ async function runAction(alerts, {
         );
       }
       response.end(JSON.stringify(request.url.includes('page=2') ? nextAlerts : alerts));
+      return;
+    }
+    if (request.method === 'GET' && request.url?.startsWith('/repos/zaphiro-technologies/test/pulls')) {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify(openPullRequests));
       return;
     }
     if (request.method === 'PATCH' && request.url?.includes('/dependabot/alerts/')) {
@@ -250,6 +256,26 @@ test('filters a candidate to one vulnerability when requested', async () => {
   assert.equal(result.vex.statements.length, 1);
   assert.equal(result.vex.statements[0].vulnerability.name, 'CVE-2022-32149');
   assert.deepEqual(JSON.parse(outputValue(result.output, 'vulnerability-ids')), ['CVE-2022-32149']);
+});
+
+test('reuses an open vulnerability branch from an earlier workflow run', async () => {
+  const result = await runAction([alert(16, 'not_used', 'CVE-2022-32149')], {
+    runId: '67890',
+    vulnerabilityId: 'CVE-2022-32149',
+    openPullRequests: [{
+      number: 9,
+      head: {
+        ref: 'automation/dependabot-vex-CVE-2022-32149-12345',
+        repo: { full_name: 'zaphiro-technologies/test' },
+      },
+    }],
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(
+    outputValue(result.output, 'candidate-branch'),
+    'automation/dependabot-vex-CVE-2022-32149-12345',
+  );
 });
 
 test('skips no_bandwidth and annotates the original alert', async () => {

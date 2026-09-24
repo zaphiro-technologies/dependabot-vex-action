@@ -28,10 +28,12 @@ The action emits safe `pull-request-title`, `pull-request-body`, and
 new vulnerability identifiers, then invokes the action once per identifier and
 uses those outputs with `peter-evans/create-pull-request`. When
 `candidate-branch` is omitted, a candidate uses
-`automation/dependabot-vex-<vulnerability-id>-<GITHUB_RUN_ID>`. A rerun of the
-same GitHub Actions run therefore targets the same vulnerability branch, while
-different vulnerabilities in one run get separate branches and pull requests.
-Pass `candidate-branch` when a caller needs a different branch identity.
+`automation/dependabot-vex-<vulnerability-id>-<GITHUB_RUN_ID>` when no open
+branch already matches that vulnerability. If an open matching branch exists,
+the action reuses it, including across later workflow runs. A rerun of the same
+GitHub Actions run also targets the same branch, while different vulnerabilities
+in one run get separate branches and pull requests. Pass `candidate-branch` when
+a caller needs a different branch identity.
 
 ## Usage
 
@@ -106,7 +108,7 @@ jobs:
           base-branch: main
           vulnerability-id: ${{ matrix.vulnerability-id }}
 
-      - uses: peter-evans/create-pull-request@v7
+      - uses: peter-evans/create-pull-request@v8
         if: ${{ steps.vex.outputs.changed == 'true' }}
         with:
           token: ${{ steps.app-token.outputs.token }}

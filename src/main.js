@@ -31,17 +31,24 @@ const baseBranch = input('base-branch', 'main');
 const vexPath = input('vex-path', '.vex/dependabot.openvex.json');
 const ledgerPath = input('dismissal-ledger-path', '.vex/dependabot-dismissals.json');
 const vulnerabilityId = input('vulnerability-id');
-const candidateBranch = input('candidate-branch') || defaultCandidateBranch();
+const requestedCandidateBranch = input('candidate-branch');
+let candidateBranch = requestedCandidateBranch || defaultCandidateBranch();
 const githubOutput = process.env.GITHUB_OUTPUT;
 
-function defaultCandidateBranch() {
-  const identity = vulnerabilityId || 'scope';
-  const safeIdentity = String(identity)
+function safeBranchIdentity(identity) {
+  return String(identity)
     .replaceAll(/[^A-Za-z0-9._-]+/g, '-')
     .replaceAll(/-+/g, '-')
     .replaceAll(/^[-.]+|[-.]+$/g, '')
     .slice(0, 80) || 'scope';
-  return `automation/dependabot-vex-${safeIdentity}-${process.env.GITHUB_RUN_ID || 'local'}`;
+}
+
+function vulnerabilityBranchPrefix() {
+  return `automation/dependabot-vex-${safeBranchIdentity(vulnerabilityId)}`;
+}
+
+function defaultCandidateBranch() {
+  return `${vulnerabilityBranchPrefix()}-${process.env.GITHUB_RUN_ID || 'local'}`;
 }
 
 function input(name, fallback = '') {
@@ -129,6 +136,24 @@ async function allDismissedAlerts() {
     endpoint = nextPage(response.headers.get('link'));
   }
   return alerts;
+}
+
+async function reuseExistingCandidateBranch() {
+  if (requestedCandidateBranch || !vulnerabilityId || vulnerabilityId === '__vex_scope__') return;
+
+  const endpoint = `/repos/${owner}/${repo}/pulls?state=open&base=${encodeURIComponent(baseBranch)}&per_page=100`;
+  const response = await github(endpoint);
+  const prefix = `${vulnerabilityBranchPrefix()}-`;
+  const candidates = (response.body || [])
+    .filter(pullRequest =>
+      pullRequest.head?.repo?.full_name === repository
+      && pullRequest.head?.ref?.startsWith(prefix))
+    .sort((left, right) => (left.number || 0) - (right.number || 0));
+  const existing = candidates[0]?.head?.ref;
+  if (existing) {
+    candidateBranch = existing;
+    console.log(`Reusing existing Dependabot VEX candidate branch: ${existing}`);
+  }
 }
 
 function section(text, heading) {
@@ -632,6 +657,7 @@ function pullRequestDetails(newRecords, skipped, ledgerChanged, vexChanged) {
 async function main() {
   const products = productPurls();
   if (!products.length) fail('product-purls must contain at least one non-empty PURL');
+  await reuseExistingCandidateBranch();
 
   const alerts = await allDismissedAlerts();
   const normalized = alerts.map(normalizeAlert);
