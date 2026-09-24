@@ -407,23 +407,20 @@ function collectGoSumVersions(files, dependency, versions) {
   }
 }
 
-function dependencyVersion(alert, dependency) {
-  if (alert.dependency?.version) return String(alert.dependency.version);
+function dependencyVersions(alert, dependency) {
+  if (alert.dependency?.version) return [String(alert.dependency.version)];
   const versions = new Set();
   const files = lockfilePaths(alert);
   const ecosystem = dependency.ecosystem;
 
   collectLockfileVersions(files, ecosystem, dependency, versions);
-  if (versions.size === 1) return [...versions][0];
-
   if ((ecosystem === 'go' || ecosystem === 'gomod') && versions.size === 0) {
     collectGoSumVersions(files, dependency, versions);
-    if (versions.size === 1) return [...versions][0];
   }
   if (versions.size > 1) {
-    console.warn(`Warning: multiple installed versions found for ${dependency.name}; omitting the PURL version`);
+    console.warn(`Warning: multiple installed versions found for ${dependency.name}; retaining all PURL versions`);
   }
-  return null;
+  return [...versions];
 }
 
 function vulnerabilityInfo(alert) {
@@ -441,13 +438,15 @@ function vulnerabilityInfo(alert) {
 
 function normalizeAlert(alert) {
   const dependency = packageInfo(alert);
+  const versions = dependencyVersions(alert, dependency);
   return {
     alert: alert.number,
     url: alert.html_url || `${serverUrl}/${repository}/security/dependabot/${alert.number}`,
     package: {
       ecosystem: dependency.ecosystem || null,
       name: dependency.name || null,
-      version: dependencyVersion(alert, dependency),
+      version: versions.length === 1 ? versions[0] : null,
+      ...(versions.length > 1 ? { versions } : {}),
     },
     vulnerability: vulnerabilityInfo(alert),
     vulnerable_version_range: alert.security_vulnerability?.vulnerable_version_range || null,
@@ -479,7 +478,7 @@ function encodePurlValue(value) {
     `%${character.codePointAt(0).toString(16).toUpperCase()}`);
 }
 
-function dependencyPurl(record) {
+function dependencyPurl(record, version = record.package?.version) {
   const ecosystem = record.package?.ecosystem || '';
   const name = String(record.package?.name || '')
     .split('/')
@@ -491,8 +490,15 @@ function dependencyPurl(record) {
     composer: 'composer', nuget: 'nuget', pub: 'pub', hex: 'hex', mix: 'hex',
     docker: 'docker',
   };
-  const version = record.package?.version ? `@${encodePurlValue(record.package.version)}` : '';
-  return `pkg:${types[ecosystem] || ecosystem}/${name}${version}`;
+  const purlVersion = version ? `@${encodePurlValue(version)}` : '';
+  return `pkg:${types[ecosystem] || ecosystem}/${name}${purlVersion}`;
+}
+
+function dependencyPurls(record) {
+  const versions = Array.isArray(record.package?.versions) && record.package.versions.length
+    ? record.package.versions
+    : [record.package?.version || null];
+  return [...new Set(versions.map(version => dependencyPurl(record, version)))];
 }
 
 function mapVexStatus(record) {
@@ -555,15 +561,15 @@ function vexCandidate(record, products) {
 }
 
 function vexProducts(record, products) {
-  const dependency = dependencyPurl(record);
+  const dependencies = dependencyPurls(record);
   return [
     ...products
-      .filter(product => product !== dependency)
+      .filter(product => !dependencies.includes(product))
       .map(product => ({
         '@id': product,
-        subcomponents: [{ '@id': dependency }],
+        subcomponents: dependencies.map(dependency => ({ '@id': dependency })),
       })),
-    { '@id': dependency },
+    ...dependencies.map(dependency => ({ '@id': dependency })),
   ];
 }
 

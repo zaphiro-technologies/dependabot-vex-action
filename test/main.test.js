@@ -343,6 +343,67 @@ test('promotes an npm dependency PURL to a direct VEX product', async () => {
   });
 });
 
+test('resolves an npm dependency version from a Yarn Berry lockfile', async () => {
+  const current = alert(18, 'not_used', 'CVE-2026-00018', 'browserslist');
+  current.dependency.package.ecosystem = 'npm';
+  delete current.dependency.version;
+  current.dependency.manifest_path = 'package.json';
+  current.security_vulnerability.package.ecosystem = 'npm';
+  const result = await runAction([current], {
+    files: {
+      'package.json': { name: 'documentation-test' },
+      'yarn.lock': `__metadata:
+  version: 8
+  cacheKey: 10c0
+
+"browserslist@npm:^4.28.7":
+  version: 4.28.7
+  resolution: "browserslist@npm:4.28.7"
+  languageName: node
+  linkType: hard
+`,
+    },
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.vex.statements[0].products.at(-1)['@id'], 'pkg:npm/browserslist@4.28.7');
+});
+
+test('retains all installed npm versions from a Yarn Berry lockfile', async () => {
+  const current = alert(19, 'not_used', 'CVE-2026-00019', 'browserslist');
+  current.dependency.package.ecosystem = 'npm';
+  delete current.dependency.version;
+  current.dependency.manifest_path = 'package.json';
+  current.security_vulnerability.package.ecosystem = 'npm';
+  const result = await runAction([current], {
+    files: {
+      'package.json': { name: 'documentation-test' },
+      'yarn.lock': `"browserslist@npm:^4.24.0":
+  version: 4.24.5
+  resolution: "browserslist@npm:4.24.5"
+
+"browserslist@npm:^4.28.1":
+  version: 4.28.7
+  resolution: "browserslist@npm:4.28.7"
+`,
+    },
+  });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(
+    result.vex.statements[0].products.map(product => product['@id']),
+    [
+      'pkg:oci/test?repository_url=ghcr.io%2Fzaphiro-technologies%2Ftest',
+      'pkg:npm/browserslist@4.24.5',
+      'pkg:npm/browserslist@4.28.7',
+    ],
+  );
+  assert.deepEqual(
+    result.vex.statements[0].products[0].subcomponents.map(component => component['@id']),
+    ['pkg:npm/browserslist@4.24.5', 'pkg:npm/browserslist@4.28.7'],
+  );
+});
+
 test('resolves a Go dependency version from go.mod when the alert omits it', async () => {
   const current = alert(15, 'not_used', 'CVE-2026-00015');
   delete current.dependency.version;
