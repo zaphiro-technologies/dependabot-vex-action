@@ -16,5 +16,5 @@ on:
 
 jobs:
   javascript:
-    uses: zaphiro-technologies/github-workflows/.github/workflows/js.yaml@improve-release-evidences
+    uses: zaphiro-technologies/github-workflows/.github/workflows/js.yaml@main
     secrets: inherit

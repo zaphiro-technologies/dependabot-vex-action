@@ -1,4 +1,4 @@
-name: Test New Release
+name: New Release
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   release:
-    uses: zaphiro-technologies/github-workflows/.github/workflows/new-release.yaml@improve-release-evidences
+    uses: zaphiro-technologies/github-workflows/.github/workflows/new-release.yaml@main
     with:
       tag: ${{ inputs.tag }}
       dependency-scan: ${{ inputs.dependency-scan }}
