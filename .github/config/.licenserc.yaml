@@ -13,5 +13,9 @@ header:
     - "LICENSE"
     - "package.json"
     - "yarn.lock"
+    - ".gitignore"
+    - ".yarnrc.yml"
+    - "Makefile"
+    - "sonar-project.properties"
 
   comment: on-failure
