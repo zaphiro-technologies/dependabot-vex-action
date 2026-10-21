@@ -1,0 +1,22 @@
+name: Release Notes Management
+on:
+  push:
+    tags:
+      - "*"
+  pull_request_review:
+  pull_request:
+    types:
+      - labeled
+      - unlabeled
+      - edited
+      - synchronize
+    branches: [main]
+  release:
+    types:
+      - created
+      - published
+
+jobs:
+  release-notes:
+    uses: zaphiro-technologies/github-workflows/.github/workflows/release-notes.yaml@improve-release-evidences
+    secrets: inherit
