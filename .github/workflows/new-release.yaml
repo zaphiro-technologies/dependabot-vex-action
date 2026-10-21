@@ -1,4 +1,4 @@
-name: Test New Release
+name: New Release
 
 on:
   workflow_dispatch:
