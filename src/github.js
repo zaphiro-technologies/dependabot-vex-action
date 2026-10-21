@@ -58,14 +58,17 @@ function nextPage(linkHeader) {
 }
 
 export async function allDismissedAlerts(request, runtime) {
-  const alerts = [];
-  let endpoint = `/repos/${runtime.owner}/${runtime.repo}/dependabot/alerts?state=dismissed&per_page=100`;
-  while (endpoint) {
-    const response = await request(endpoint);
-    alerts.push(...(response.body || []));
-    endpoint = nextPage(response.headers.get('link'));
-  }
-  return alerts;
+  const endpoint = `/repos/${runtime.owner}/${runtime.repo}/dependabot/alerts?state=dismissed&per_page=100`;
+  return readAlertPage(request, endpoint, []);
+}
+
+async function readAlertPage(request, endpoint, alerts) {
+  const response = await request(endpoint);
+  const collected = alerts.concat(response.body || []);
+  const nextEndpoint = nextPage(response.headers.get('link'));
+  return nextEndpoint
+    ? readAlertPage(request, nextEndpoint, collected)
+    : collected;
 }
 
 export async function reuseExistingCandidateBranch(request, runtime) {
@@ -88,22 +91,29 @@ export async function reuseExistingCandidateBranch(request, runtime) {
 }
 
 export async function annotateSkippedAlerts(request, runtime, alerts) {
-  for (const alert of alerts) {
-    if (alert.dismissed_reason !== 'no_bandwidth') continue;
-    const note = '[dependabot-vex-action] This dismissal is not a security assessment; no VEX statement was generated.';
-    const original = alert.dismissed_comment || '';
-    if (original.includes(note)) continue;
+  const note = '[dependabot-vex-action] This dismissal is not a security assessment; no VEX statement was generated.';
+  const pendingAnnotations = alerts
+    .filter(alert => alert.dismissed_reason === 'no_bandwidth')
+    .filter(alert => !(alert.dismissed_comment || '').includes(note));
 
-    const comment = original ? `${original}\n\n${note}` : note;
-    await request(`/repos/${runtime.owner}/${runtime.repo}/dependabot/alerts/${alert.number}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        state: 'dismissed',
-        dismissed_reason: 'no_bandwidth',
-        dismissed_comment: comment,
-      }),
-    });
-    console.log(`Annotated Dependabot alert ${alert.number}: no VEX security assessment`);
-  }
+  // Keep writes sequential to respect GitHub's alert update limits and preserve log order.
+  await pendingAnnotations.reduce(
+    (previous, alert) => previous.then(() => annotateSkippedAlert(request, runtime, alert, note)),
+    Promise.resolve(),
+  );
+}
+
+async function annotateSkippedAlert(request, runtime, alert, note) {
+  const original = alert.dismissed_comment || '';
+  const comment = original ? `${original}\n\n${note}` : note;
+  await request(`/repos/${runtime.owner}/${runtime.repo}/dependabot/alerts/${alert.number}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      state: 'dismissed',
+      dismissed_reason: 'no_bandwidth',
+      dismissed_comment: comment,
+    }),
+  });
+  console.log(`Annotated Dependabot alert ${alert.number}: no VEX security assessment`);
 }

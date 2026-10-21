@@ -30,6 +30,31 @@ export function fail(message) {
   process.exit(1);
 }
 
+function safeBranchIdentity(identity) {
+  let normalized = '';
+  let previousWasHyphen = false;
+
+  for (const character of String(identity)) {
+    const code = character.codePointAt(0);
+    const allowed = (code >= 48 && code <= 57)
+      || (code >= 65 && code <= 90)
+      || (code >= 97 && code <= 122)
+      || character === '.'
+      || character === '_'
+      || character === '-';
+    const next = allowed ? character : '-';
+    if (next === '-' && previousWasHyphen) continue;
+    normalized += next;
+    previousWasHyphen = next === '-';
+  }
+
+  let start = 0;
+  let end = normalized.length;
+  while (start < end && (normalized[start] === '-' || normalized[start] === '.')) start++;
+  while (end > start && (normalized[end - 1] === '-' || normalized[end - 1] === '.')) end--;
+  return normalized.slice(start, end).slice(0, 80) || 'scope';
+}
+
 export function createRuntime() {
   const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
   const repository = process.env.GITHUB_REPOSITORY;
@@ -41,15 +66,6 @@ export function createRuntime() {
   const [owner, repo] = repository.split('/');
   const vulnerabilityId = input('vulnerability-id');
   const requestedCandidateBranch = input('candidate-branch');
-
-  function safeBranchIdentity(identity) {
-    return String(identity)
-      .replaceAll(/[^A-Za-z0-9._-]+/g, '-')
-      .replaceAll(/-+/g, '-')
-      .replaceAll(/^[-.]+/g, '')
-      .replaceAll(/[-.]+$/g, '')
-      .slice(0, 80) || 'scope';
-  }
 
   const vulnerabilityBranchPrefix = () =>
     `automation/dependabot-vex-${safeBranchIdentity(vulnerabilityId)}`;
